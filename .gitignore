@@ -1,0 +1,37 @@
+# Project-local build outputs, downloaded toolchains and dependencies.
+/.pio/
+/.pio-core/
+/.tools/
+/build/
+/dist/
+
+# PlatformIO temporarily generates this next to the Arduino sketch.
+/ESP8266_Remote/*.ino.cpp
+
+# Python caches and virtual environments.
+__pycache__/
+*.py[cod]
+/.venv/
+/venv/
+
+# Private network configuration; sanitized examples remain versioned.
+/ESP8266_Remote/config.local.h
+.env
+.env.*
+!.env.example
+!.env.*.example
+
+# Raw local hardware captures may contain private network details.
+# Reviewed, sanitized evidence elsewhere in evidence/ can be committed.
+/docs/testing/evidence/local/
+
+# Local editor/OS files. Do not ignore .agents/ or shared source configuration.
+/.idea/
+/.vscode/*.local.json
+*.code-workspace
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.swp
+*.swo
+*~
