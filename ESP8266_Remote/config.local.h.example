@@ -1,8 +1,0 @@
-#pragma once
-// Copy to config.local.h, which is ignored by Git.
-// Default is SoftAP. This demonstration password is public; change it locally.
-#define REMOTE_USE_STA 0
-#define REMOTE_AP_PASSWORD "esp8266-demo"
-// For STA instead, set REMOTE_USE_STA to 1 and fill in your own network locally.
-#define REMOTE_STA_SSID "YOUR_WIFI_SSID"
-#define REMOTE_STA_PASSWORD "YOUR_WIFI_PASSWORD"

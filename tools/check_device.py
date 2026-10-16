@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--host", default="http://192.168.4.1")
+    parser.add_argument("--host", required=True, help="HTTP origin from the board serial log (STA uses DHCP)")
     parser.add_argument("--resource", default="led.main")
     parser.add_argument("--cycles", type=int, default=10, help="10 cycles = 20 state changes")
     args = parser.parse_args()
@@ -42,6 +42,8 @@ def main():
     status, device = call("GET", "/api/v1/device")
     assert status == 200
     boot = device["bootId"]
+    capability_revision = device.get("capabilitiesRevision")
+    assert type(capability_revision) is int and capability_revision >= 0
     capabilities = {r["id"]: r for r in device["resources"]}
     assert args.resource in capabilities
     properties = {p["id"]: p for p in capabilities[args.resource]["properties"]}
@@ -51,6 +53,8 @@ def main():
     def state():
         status, snapshot = call("GET", "/api/v1/state")
         assert status == 200 and snapshot["bootId"] == boot and snapshot["deviceId"] == device["deviceId"]
+        assert type(snapshot.get("capabilitiesRevision")) is int
+        assert snapshot["capabilitiesRevision"] == capability_revision
         resource = next(r for r in snapshot["resources"] if r["id"] == args.resource)
         assert resource["quality"]["on"] == "good"
         return resource["values"]["on"], snapshot["revision"]
@@ -65,14 +69,17 @@ def main():
         assert status == 200 and result["value"] is value
         assert result["requestId"] == json.loads(request)["requestId"]
         assert result["bootId"] == boot and result["deviceId"] == device["deviceId"]
-        assert result["revision"] == revision + (previous != value)
-        assert state() == (value, result["revision"])
+        # Sensor sampling can advance the global revision between HTTP requests.
+        assert result["revision"] >= revision + (previous != value)
+        confirmed, latest_revision = state()
+        assert confirmed is value and latest_revision >= result["revision"]
 
     def rejected(request, status, code, media="application/json"):
         before = state()
         actual, result = call("PUT", endpoint, request, media)
         assert actual == status and result["error"]["code"] == code
-        assert state() == before
+        after = state()
+        assert after[0] is before[0] and after[1] >= before[1]
 
     set_value(False)
     for _ in range(args.cycles):

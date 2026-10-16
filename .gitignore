@@ -14,8 +14,7 @@ __pycache__/
 /.venv/
 /venv/
 
-# Private network configuration; sanitized examples remain versioned.
-/ESP8266_Remote/config.local.h
+# Other local environment files; WiFiConfig.h is intentionally versioned.
 .env
 .env.*
 !.env.example

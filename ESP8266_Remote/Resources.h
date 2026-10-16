@@ -1,69 +1,67 @@
 #pragma once
 #include "Config.h"
+#include "Validation.h"
+#include "Peripheral.h"
 #include <string.h>
-
-inline bool validIdentifier(const char* text) {
-  if (!text) return false;
-  const size_t length = strlen(text);
-  if (length == 0 || length > 48) return false;
-  for (size_t i = 0; i < length; ++i) {
-    const char c = text[i];
-    if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-          (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-')) return false;
-  }
-  return true;
-}
-
-class BinaryOutput {
- public:
-  void begin(const config::BinaryOutputConfig& spec) {
-    spec_ = &spec;
-    // Set inactive latch before enabling output to avoid a startup pulse.
-    digitalWrite(spec.gpio, spec.activeLow ? HIGH : LOW);
-    pinMode(spec.gpio, OUTPUT);
-    on_ = false;
-  }
-  bool set(bool on) {
-    digitalWrite(spec_->gpio, (on != spec_->activeLow) ? HIGH : LOW);
-    if ((digitalRead(spec_->gpio) == HIGH) != (on != spec_->activeLow)) {
-      digitalWrite(spec_->gpio, (on_ != spec_->activeLow) ? HIGH : LOW);
-      return false;
-    }
-    on_ = on;
-    return true;
-  }
-  bool value() const { return on_; }
-  const config::BinaryOutputConfig& spec() const { return *spec_; }
-
- private:
-  const config::BinaryOutputConfig* spec_ = nullptr;
-  bool on_ = false;
-};
 
 class ResourceRegistry {
  public:
-  bool begin() {
+  bool begin(const config::ResourceConfig* specs = config::kResources, size_t count = config::kResourceCount) {
     // Validate the entire configuration before touching any pins.
-    for (size_t i = 0; i < config::kOutputCount; ++i) {
-      const auto& spec = config::kOutputs[i];
-      if (!validIdentifier(spec.id) || !spec.name ||
-          !((spec.gpio == 0 || spec.gpio == 2 || spec.gpio == 4 || spec.gpio == 5) ||
-            (spec.gpio >= 12 && spec.gpio <= 16))) return false;
+    if (!validDisplayName(config::kDeviceName) || count > config::kMaxResources || (count && !specs)) return false;
+    unsigned analogCount = 0;
+    for (size_t i = 0; i < count; ++i) {
+      const auto& spec = specs[i];
+      if (!validIdentifier(spec.id) || !validDisplayName(spec.name) ||
+          !validIdentifier(spec.propertyId) || !validDisplayName(spec.propertyName) || !spec.unit) return false;
+      if (spec.type == config::ResourceType::Analog) {
+        if (spec.gpio != A0 || ++analogCount > 1 || spec.activeLow ||
+            spec.minimum != 0 || spec.maximum != config::kAdcReportedMaximum || spec.step != 1 ||
+            !strcmp(spec.propertyId, config::kVoltagePropertyId) ||
+            !validIdentifier(config::kVoltagePropertyId) || !validDisplayName(config::kVoltagePropertyName) ||
+            !std::isfinite(config::kAdcFullScaleVolts) || config::kAdcFullScaleVolts <= 0 ||
+            config::kAdcFullScaleCount <= 0 || config::kAdcFullScaleCount > config::kAdcReportedMaximum) return false;
+      } else {
+        if (!((spec.gpio == 0 || spec.gpio == 2 || spec.gpio == 4 || spec.gpio == 5) ||
+              (spec.gpio >= 12 && spec.gpio <= 16))) return false;
+        if (spec.type == config::ResourceType::Binary) {
+          if (spec.minimum != 0 || spec.maximum != 1 || spec.step != 1) return false;
+        } else if (spec.type == config::ResourceType::Pwm) {
+          if (spec.minimum != 0 || spec.maximum != 100 || spec.step <= 0 || spec.step > 100 || 100 % spec.step) return false;
+        } else return false;
+      }
       for (size_t j = 0; j < i; ++j) {
-        if (spec.gpio == config::kOutputs[j].gpio ||
-            strcmp(spec.id, config::kOutputs[j].id) == 0) return false;
+        if (spec.gpio == specs[j].gpio || strcmp(spec.id, specs[j].id) == 0) return false;
       }
     }
-    for (size_t i = 0; i < config::kOutputCount; ++i) outputs_[i].begin(config::kOutputs[i]);
+    count_ = count; revision_ = 0; firstSample_ = true; lastSample_ = 0;
+    for (size_t i = 0; i < count_; ++i) resources_[i].begin(specs[i]);
     return true;
   }
-  BinaryOutput* find(const char* id) {
-    for (size_t i = 0; i < config::kOutputCount; ++i)
-      if (strcmp(id, outputs_[i].spec().id) == 0) return &outputs_[i];
+  Peripheral* find(const char* id) {
+    for (size_t i = 0; i < count_; ++i)
+      if (strcmp(id, resources_[i].spec().id) == 0) return &resources_[i];
     return nullptr;
   }
-  BinaryOutput& at(size_t i) { return outputs_[i]; }
+  Peripheral& at(size_t i) { return resources_[i]; }
+  size_t size() const { return count_; }
+  uint64_t revision() const { return revision_; }
+  bool write(Peripheral& resource, int32_t target) {
+    const int32_t before = resource.value();
+    if (!resource.set(target)) return false;
+    if (before != resource.value()) ++revision_;
+    return true;
+  }
+  void sample(uint32_t now) {
+    if (!firstSample_ && now - lastSample_ < config::kSampleIntervalMs) return;
+    firstSample_ = false; lastSample_ = now;
+    for (size_t i = 0; i < count_; ++i) if (resources_[i].sample()) ++revision_;
+  }
 
  private:
-  BinaryOutput outputs_[config::kOutputCount];
+  Peripheral resources_[config::kMaxResources];
+  size_t count_ = 0;
+  uint64_t revision_ = 0;
+  uint32_t lastSample_ = 0;
+  bool firstSample_ = true;
 };

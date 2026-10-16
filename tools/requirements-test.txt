@@ -1,0 +1,2 @@
+# Optional upstream JSON Schema validation; install into .tools/python.
+jsonschema==4.23.0

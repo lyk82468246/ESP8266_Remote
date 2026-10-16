@@ -1,5 +1,6 @@
 #pragma once
 #include <ArduinoJson.h>
+#include <cmath>
 #include "HttpRequest.h"
 #include "Resources.h"
 #include "StrictJson.h"
@@ -25,6 +26,7 @@ class Api {
              static_cast<unsigned long>(entropy1), static_cast<unsigned long>(entropy2));
   }
   int status() const { return status_; }
+  const char* deviceId() const { return deviceId_; }
   const char* allowedMethod() const { return allowedMethod_; }
   JsonDocument& response() { return response_; }
   void error(int status, const char* code, const char* message, const char* requestId = nullptr) {
@@ -69,7 +71,6 @@ class Api {
   StaticJsonDocument<4096> response_;
   StaticJsonDocument<4096> input_;
   char deviceId_[24] = {}, bootId_[32] = {};
-  uint64_t revision_ = 0;
   int status_ = 200;
   const char* allowedMethod_ = nullptr;
   void methodError(const char* allowed) {
@@ -83,28 +84,52 @@ class Api {
   }
   void describe() {
     identity(); response_["name"] = config::kDeviceName;
+    response_["capabilitiesRevision"] = config::kCapabilitiesRevision;
     response_["firmwareVersion"] = config::kFirmwareVersion;
     JsonArray resources = response_.createNestedArray("resources");
-    for (size_t i = 0; i < config::kOutputCount; ++i) {
+    for (size_t i = 0; i < registry_.size(); ++i) {
       const auto& spec = registry_.at(i).spec();
       JsonObject resource = resources.createNestedObject();
       resource["id"] = spec.id; resource["name"] = spec.name;
-      resource["kind"] = "binary-output";
-      JsonObject property = resource.createNestedArray("properties").createNestedObject();
-      property["id"] = "on"; property["name"] = "开关";
-      property["type"] = "boolean";
-      property["readable"] = true; property["writable"] = true;
+      const bool boolean = spec.type == config::ResourceType::Binary;
+      const bool writable = spec.type != config::ResourceType::Analog;
+      resource["kind"] = boolean ? "binary-output" : (writable ? "range-output" : "sensor");
+      JsonArray properties = resource.createNestedArray("properties");
+      JsonObject property = properties.createNestedObject();
+      property["id"] = spec.propertyId; property["name"] = spec.propertyName;
+      property["type"] = boolean ? "boolean" : "integer";
+      property["readable"] = true; property["writable"] = writable;
+      if (!boolean) {
+        property["min"] = spec.minimum; property["max"] = spec.maximum;
+        property["step"] = spec.step; property["unit"] = spec.unit;
+      }
+      if (spec.type == config::ResourceType::Analog) {
+        JsonObject voltage = properties.createNestedObject();
+        voltage["id"] = config::kVoltagePropertyId; voltage["name"] = config::kVoltagePropertyName;
+        voltage["type"] = "number"; voltage["readable"] = true; voltage["writable"] = false;
+        voltage["min"] = 0; voltage["max"] = config::kAdcFullScaleVolts; voltage["unit"] = "V";
+      }
     }
   }
   void snapshot() {
-    identity(); response_["revision"] = revision_;
+    identity(); response_["revision"] = registry_.revision();
+    response_["capabilitiesRevision"] = config::kCapabilitiesRevision;
     JsonArray resources = response_.createNestedArray("resources");
-    for (size_t i = 0; i < config::kOutputCount; ++i) {
+    for (size_t i = 0; i < registry_.size(); ++i) {
       auto& output = registry_.at(i);
       JsonObject resource = resources.createNestedObject();
       resource["id"] = output.spec().id;
-      resource.createNestedObject("values")["on"] = output.value();
-      resource.createNestedObject("quality")["on"] = "good";
+      JsonObject values = resource.createNestedObject("values");
+      if (!output.available()) values[output.spec().propertyId] = nullptr;
+      else if (output.boolean()) values[output.spec().propertyId] = static_cast<bool>(output.value());
+      else values[output.spec().propertyId] = output.value();
+      JsonObject quality = resource.createNestedObject("quality");
+      quality[output.spec().propertyId] = output.available() ? "good" : "unavailable";
+      if (output.spec().type == config::ResourceType::Analog) {
+        if (output.voltageAvailable()) values[config::kVoltagePropertyId] = output.voltage();
+        else values[config::kVoltagePropertyId] = nullptr;
+        quality[config::kVoltagePropertyId] = output.voltageAvailable() ? "good" : "unavailable";
+      }
     }
   }
   static bool validUuid(const char* uuid) {
@@ -138,25 +163,48 @@ class Api {
         !input_.containsKey("value")) {
       error(400, "INVALID_REQUEST", "Missing expectedBootId or value", requestId); return;
     }
-    BinaryOutput* output = registry_.find(resourceId);
+    Peripheral* output = registry_.find(resourceId);
     if (!output) { error(404, "RESOURCE_NOT_FOUND", "Resource does not exist", requestId); return; }
-    if (strcmp(propertyId, "on")) {
+    if (strcmp(propertyId, output->spec().propertyId) &&
+        !(output->spec().type == config::ResourceType::Analog && !strcmp(propertyId, config::kVoltagePropertyId))) {
       error(404, "PROPERTY_NOT_FOUND", "Property does not exist", requestId); return;
     }
     if (strcmp(expectedBoot, bootId_)) {
       error(409, "DEVICE_RESTARTED", "Read device and state again", requestId); return;
     }
-    if (!input_["value"].is<bool>()) {
-      error(422, "INVALID_VALUE", "Property on requires a JSON boolean", requestId); return;
+    if (!output->writable()) {
+      error(422, "READ_ONLY", "Sensor property is read-only", requestId); return;
     }
-    const bool target = input_["value"].as<bool>();
-    const bool changed = target != output->value();
-    if (!output->set(target)) {
-      error(500, "DRIVER_ERROR", "GPIO output latch could not be confirmed", requestId); return;
+    const auto& spec = output->spec();
+    int32_t target = 0;
+    if (output->boolean()) {
+      if (!input_["value"].is<bool>()) {
+        error(422, "INVALID_VALUE", "Value must be a JSON boolean", requestId); return;
+      }
+      target = static_cast<int32_t>(input_["value"].as<bool>());
+    } else {
+      if (!input_["value"].is<double>()) {
+        error(422, "INVALID_VALUE", "Value must be a JSON number", requestId); return;
+      }
+      const double number = input_["value"].as<double>();
+      // JSON 25 and 25.0 both represent an integer value. Android uses Double.
+      // Validate before narrowing so fractional, non-finite and large values cannot be coerced.
+      if (!std::isfinite(number) || std::trunc(number) != number ||
+          number < spec.minimum || number > spec.maximum) {
+        error(422, "INVALID_VALUE", "Value must be a finite whole number within range", requestId); return;
+      }
+      target = static_cast<int32_t>(number);
     }
-    if (changed) ++revision_;
+    if (target < spec.minimum || target > spec.maximum || (target - spec.minimum) % spec.step != 0) {
+      error(422, "INVALID_VALUE", "Value outside range or step", requestId); return;
+    }
+    if (!registry_.write(*output, target)) {
+      error(500, "DRIVER_ERROR", "Output driver could not confirm configuration", requestId); return;
+    }
     identity(); response_["requestId"] = requestId;
-    response_["resourceId"] = output->spec().id; response_["propertyId"] = "on";
-    response_["value"] = output->value(); response_["revision"] = revision_;
+    response_["resourceId"] = spec.id; response_["propertyId"] = spec.propertyId;
+    if (output->boolean()) response_["value"] = static_cast<bool>(output->value());
+    else response_["value"] = output->value();
+    response_["revision"] = registry_.revision();
   }
 };

@@ -3,9 +3,11 @@ extern "C" {
 #include <user_interface.h>
 }
 #include "Api.h"
+#include "NetworkService.h"
 
 ResourceRegistry registry;
 Api api(registry);
+NetworkService network;
 WiFiServer server(config::kPort);
 WiFiClient client;
 HttpRequest request;
@@ -48,39 +50,19 @@ static void prepareResponse() {
 void setup() {
   Serial.begin(115200); Serial.println();
   if (!registry.begin()) {
-    Serial.println("Invalid output configuration (ID, GPIO or duplicate pin). API disabled.");
+    Serial.println("Invalid output configuration (name, ID, GPIO or duplicate pin). API disabled.");
     return;
   }
   api.begin(ESP.getChipId(), os_random(), os_random());
-  WiFi.persistent(false);
-#if REMOTE_USE_STA
-  WiFi.mode(WIFI_STA); WiFi.setAutoReconnect(true);
-  WiFi.begin(REMOTE_STA_SSID, REMOTE_STA_PASSWORD);
-  Serial.println("STA connecting; address will be printed when connected.");
-#else
-  WiFi.mode(WIFI_AP);
-  char ssid[32];
-  snprintf(ssid, sizeof(ssid), "ESP8266-Remote-%06lx", static_cast<unsigned long>(ESP.getChipId()));
-  if (!WiFi.softAP(ssid, REMOTE_AP_PASSWORD)) {
-    Serial.println("SoftAP setup failed. API disabled."); return;
-  }
-  Serial.printf("SSID: %s\n", ssid);
-  Serial.print("API: http://"); Serial.print(WiFi.softAPIP()); Serial.println("/api/v1/device");
-#endif
+  if (!network.begin(api.deviceId())) { Serial.println("Network setup failed. API disabled."); return; }
   server.begin(); server.setNoDelay(true); ready = true;
 }
 
 void loop() {
+  // Sampling uses a fixed cadence and cached results; HTTP handlers never wait on a sensor.
+  registry.sample(millis());
   if (!ready) { delay(1); return; }
-#if REMOTE_USE_STA
-  static uint32_t previousIp = 0;
-  const uint32_t ip = WiFi.status() == WL_CONNECTED ? static_cast<uint32_t>(WiFi.localIP()) : 0;
-  if (ip != previousIp) {
-    previousIp = ip;
-    if (ip) { Serial.print("STA IP: "); Serial.println(WiFi.localIP()); }
-    else Serial.println("STA disconnected; outputs retained.");
-  }
-#endif
+  network.update();
   if (!client) {
     client = server.accept();
     if (!client) { delay(1); return; }
