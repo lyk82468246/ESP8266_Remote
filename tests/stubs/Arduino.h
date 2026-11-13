@@ -8,13 +8,24 @@
 #define HIGH 1
 #define LOW 0
 #define OUTPUT 1
+#define INPUT 0
 #define A0 17
 extern int pinLevels[17];
 extern unsigned gpioWrites;
 extern bool failReadback;
-inline void digitalWrite(uint8_t gpio, int level) { pinLevels[gpio] = level; ++gpioWrites; }
+extern void (*testGpioWriteHook)(uint8_t, int);
+extern int (*testGpioReadHook)(uint8_t);
+extern uint32_t testMicros;
+inline void delayMicroseconds(uint32_t us) { testMicros += us; }
+inline void digitalWrite(uint8_t gpio, int level) {
+  pinLevels[gpio] = level; ++gpioWrites;
+  if (testGpioWriteHook) testGpioWriteHook(gpio, level);
+}
 inline void pinMode(uint8_t, int) {}
-inline int digitalRead(uint8_t gpio) { return failReadback ? !pinLevels[gpio] : pinLevels[gpio]; }
+inline int digitalRead(uint8_t gpio) {
+  if (testGpioReadHook) return testGpioReadHook(gpio);
+  return failReadback ? !pinLevels[gpio] : pinLevels[gpio];
+}
 extern int testAnalogValue;
 extern unsigned analogReads;
 inline int analogRead(uint8_t) { ++analogReads; return testAnalogValue; }

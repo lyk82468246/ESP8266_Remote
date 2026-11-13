@@ -88,11 +88,12 @@ class Api {
     response_["firmwareVersion"] = config::kFirmwareVersion;
     JsonArray resources = response_.createNestedArray("resources");
     for (size_t i = 0; i < registry_.size(); ++i) {
-      const auto& spec = registry_.at(i).spec();
+      const auto& output = registry_.at(i);
+      const auto& spec = output.spec();
       JsonObject resource = resources.createNestedObject();
       resource["id"] = spec.id; resource["name"] = spec.name;
       const bool boolean = spec.type == config::ResourceType::Binary;
-      const bool writable = spec.type != config::ResourceType::Analog;
+      const bool writable = output.writable();
       resource["kind"] = boolean ? "binary-output" : (writable ? "range-output" : "sensor");
       JsonArray properties = resource.createNestedArray("properties");
       JsonObject property = properties.createNestedObject();
@@ -103,11 +104,11 @@ class Api {
         property["min"] = spec.minimum; property["max"] = spec.maximum;
         property["step"] = spec.step; property["unit"] = spec.unit;
       }
-      if (spec.type == config::ResourceType::Analog) {
+      if (!writable) {
         JsonObject voltage = properties.createNestedObject();
         voltage["id"] = config::kVoltagePropertyId; voltage["name"] = config::kVoltagePropertyName;
         voltage["type"] = "number"; voltage["readable"] = true; voltage["writable"] = false;
-        voltage["min"] = 0; voltage["max"] = config::kAdcFullScaleVolts; voltage["unit"] = "V";
+        voltage["min"] = 0; voltage["max"] = output.voltageScale(); voltage["unit"] = "V";
       }
     }
   }
@@ -125,7 +126,7 @@ class Api {
       else values[output.spec().propertyId] = output.value();
       JsonObject quality = resource.createNestedObject("quality");
       quality[output.spec().propertyId] = output.available() ? "good" : "unavailable";
-      if (output.spec().type == config::ResourceType::Analog) {
+      if (!output.writable()) {
         if (output.voltageAvailable()) values[config::kVoltagePropertyId] = output.voltage();
         else values[config::kVoltagePropertyId] = nullptr;
         quality[config::kVoltagePropertyId] = output.voltageAvailable() ? "good" : "unavailable";
@@ -166,7 +167,7 @@ class Api {
     Peripheral* output = registry_.find(resourceId);
     if (!output) { error(404, "RESOURCE_NOT_FOUND", "Resource does not exist", requestId); return; }
     if (strcmp(propertyId, output->spec().propertyId) &&
-        !(output->spec().type == config::ResourceType::Analog && !strcmp(propertyId, config::kVoltagePropertyId))) {
+        !(!output->writable() && !strcmp(propertyId, config::kVoltagePropertyId))) {
       error(404, "PROPERTY_NOT_FOUND", "Property does not exist", requestId); return;
     }
     if (strcmp(expectedBoot, bootId_)) {

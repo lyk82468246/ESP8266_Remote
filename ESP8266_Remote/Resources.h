@@ -9,12 +9,19 @@ class ResourceRegistry {
   bool begin(const config::ResourceConfig* specs = config::kResources, size_t count = config::kResourceCount) {
     // Validate the entire configuration before touching any pins.
     if (!validDisplayName(config::kDeviceName) || count > config::kMaxResources || (count && !specs)) return false;
-    unsigned analogCount = 0;
+    unsigned analogCount = 0, tlcCount = 0;
+    bool occupied[A0 + 1] = {};
     for (size_t i = 0; i < count; ++i) {
       const auto& spec = specs[i];
       if (!validIdentifier(spec.id) || !validDisplayName(spec.name) ||
           !validIdentifier(spec.propertyId) || !validDisplayName(spec.propertyName) || !spec.unit) return false;
-      if (spec.type == config::ResourceType::Analog) {
+      if (spec.type == config::ResourceType::Tlc549) {
+        if (++tlcCount > 1 || spec.gpio != config::kTlc549Cs || spec.activeLow ||
+            spec.minimum != 0 || spec.maximum != config::kTlc549CodeCount - 1 || spec.step != 1 ||
+            !strcmp(spec.propertyId, config::kVoltagePropertyId) ||
+            occupied[config::kTlc549Clock] || occupied[config::kTlc549Data]) return false;
+        occupied[config::kTlc549Clock] = occupied[config::kTlc549Data] = true;
+      } else if (spec.type == config::ResourceType::Analog) {
         if (spec.gpio != A0 || ++analogCount > 1 || spec.activeLow ||
             spec.minimum != 0 || spec.maximum != config::kAdcReportedMaximum || spec.step != 1 ||
             !strcmp(spec.propertyId, config::kVoltagePropertyId) ||
@@ -30,9 +37,10 @@ class ResourceRegistry {
           if (spec.minimum != 0 || spec.maximum != 100 || spec.step <= 0 || spec.step > 100 || 100 % spec.step) return false;
         } else return false;
       }
-      for (size_t j = 0; j < i; ++j) {
-        if (spec.gpio == specs[j].gpio || strcmp(spec.id, specs[j].id) == 0) return false;
-      }
+      if (occupied[spec.gpio]) return false;
+      occupied[spec.gpio] = true;
+      for (size_t j = 0; j < i; ++j)
+        if (strcmp(spec.id, specs[j].id) == 0) return false;
     }
     count_ = count; revision_ = 0; firstSample_ = true; lastSample_ = 0;
     for (size_t i = 0; i < count_; ++i) resources_[i].begin(specs[i]);

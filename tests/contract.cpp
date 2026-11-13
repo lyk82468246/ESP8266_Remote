@@ -7,6 +7,9 @@
 int pinLevels[17] = {};
 unsigned gpioWrites = 0;
 bool failReadback = false;
+void (*testGpioWriteHook)(uint8_t, int) = nullptr;
+int (*testGpioReadHook)(uint8_t) = nullptr;
+uint32_t testMicros = 0;
 int testAnalogValue = 0;
 unsigned analogReads = 0;
 uint32_t testMillis = 0;
@@ -33,7 +36,99 @@ static std::string payload(const std::string& boot, const std::string& value) {
   return "{\"requestId\":\"" + std::string(uuid) + "\",\"expectedBootId\":\"" + boot + "\",\"value\":" + value + "}";
 }
 
+#if REMOTE_ENABLE_TLC549
+static unsigned frames, bits, falling;
+static uint32_t csEdge, clockEdge;
+static uint8_t lightCode;
+static void lightWrite(uint8_t pin, int level) {
+  if (pin == config::kTlc549Cs) {
+    CHECK(pinLevels[config::kTlc549Clock] == LOW);
+    if (level == LOW) {
+      CHECK(frames == 0 || testMicros - csEdge >= 17);
+      ++frames; bits = falling = 0;
+    } else CHECK(bits == 8 && falling == 8);
+    csEdge = testMicros;
+  } else {
+    CHECK(pin == config::kTlc549Clock && pinLevels[config::kTlc549Cs] == LOW);
+    if (level == LOW) { CHECK(testMicros - clockEdge >= 25); ++falling; }
+    else CHECK(bits == falling + 1 && bits <= 8);
+    clockEdge = testMicros;
+  }
+}
+static int lightRead(uint8_t pin) {
+  CHECK(pin == config::kTlc549Data && pinLevels[config::kTlc549Cs] == LOW);
+  CHECK(pinLevels[config::kTlc549Clock] == LOW && bits == falling && bits < 8);
+  CHECK(bits ? testMicros - clockEdge >= 25 : testMicros - csEdge >= 5);
+  const uint8_t code = frames % 2 ? 0x3C : lightCode;
+  return (code >> (7 - bits++)) & 1;
+}
+
+static void checkLight(const char* directory) {
+  static_assert(config::kResourceCount == 7, "TLC549 profile must include seven resources");
+  const auto& light = config::kResources[6];
+  ResourceRegistry registry;
+  for (uint8_t pin : {config::kTlc549Cs, config::kTlc549Clock, config::kTlc549Data}) {
+    config::ResourceConfig output = config::kResources[1]; output.gpio = pin;
+    const config::ResourceConfig before[] = {output, light}, after[] = {light, output};
+    const unsigned writes = gpioWrites;
+    CHECK(!registry.begin(before, 2) && !registry.begin(after, 2));
+    CHECK(gpioWrites == writes);
+  }
+  CHECK(registry.begin());
+  CHECK(pinLevels[config::kTlc549Cs] == HIGH && pinLevels[config::kTlc549Clock] == LOW);
+  Api api(registry); api.begin(1, 1, 2);
+  api.handle(make("GET", "/api/v1/device"));
+  CHECK(api.status() == 200 && !api.response().overflowed());
+  CHECK(measureJson(api.response()) <= config::kMaxResponse);
+  auto description = api.response()["resources"][6];
+  CHECK(description["kind"] == "sensor" && description["properties"][0]["max"] == 255);
+  CHECK(description["properties"][0]["writable"] == false && description["properties"][1]["writable"] == false);
+  if (directory) {
+    std::string json; serializeJson(api.response(), json);
+    std::ofstream(std::string(directory) + "/device-tlc549.json") << json;
+  }
+  api.handle(make("GET", "/api/v1/state"));
+  CHECK(api.response()["resources"][6]["values"]["raw"].isNull());
+  CHECK(api.response()["resources"][6]["quality"]["voltage"] == "unavailable");
+  const auto boot = api.response()["bootId"].as<std::string>();
+  for (const auto property : {"raw", "voltage"}) {
+    const unsigned writes = gpioWrites;
+    api.handle(make("PUT", std::string("/api/v1/resources/sensor.light/properties/") + property, payload(boot, "12")));
+    CHECK(api.status() == 422 && api.response()["error"]["code"] == "READ_ONLY");
+    CHECK(gpioWrites == writes);
+  }
+  testGpioWriteHook = lightWrite; testGpioReadHook = lightRead;
+  testAnalogValue = 512; lightCode = 0xA5;
+  registry.sample(10);
+  CHECK(frames == 2 && registry.revision() == 2);
+  CHECK(registry.find("sensor.pot")->value() == 512 && registry.find("sensor.light")->value() == 0xA5);
+  registry.sample(259); CHECK(frames == 2 && registry.revision() == 2);
+  testMicros += 250000;
+  registry.sample(260); CHECK(frames == 4 && registry.revision() == 2);
+  testMicros += 250000;
+  lightCode = 255; registry.sample(510); CHECK(registry.revision() == 3);
+  api.handle(make("GET", "/api/v1/state"));
+  CHECK(api.response()["resources"][6]["values"]["raw"] == 255);
+  CHECK(api.response()["resources"][6]["quality"]["raw"] == "good");
+  CHECK(std::abs(api.response()["resources"][6]["values"]["voltage"].as<double>() - 3.287) < 1e-9);
+  if (directory) {
+    std::string json; serializeJson(api.response(), json);
+    std::ofstream(std::string(directory) + "/state-tlc549.json") << json;
+  }
+  testMicros += 250000;
+  lightCode = 0; registry.sample(760);
+  CHECK(registry.revision() == 4 && registry.find("sensor.light")->available() &&
+        registry.find("sensor.light")->value() == 0 && registry.find("sensor.light")->voltage() == 0);
+  testGpioWriteHook = nullptr; testGpioReadHook = nullptr;
+}
+#endif
+
 int main(int argc, char** argv) {
+#if REMOTE_ENABLE_TLC549
+  checkLight(argc == 2 ? argv[1] : nullptr);
+  std::cout << "PASS: " << checks << " TLC549 assertions\n";
+  return 0;
+#endif
   CHECK(!validDisplayName(nullptr)); CHECK(!validDisplayName(""));
   CHECK(!validDisplayName("   ")); CHECK(!validDisplayName("\tLED"));
   CHECK(!validDisplayName("LED\x7f")); CHECK(!validDisplayName("\xc2\x85"));

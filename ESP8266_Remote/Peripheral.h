@@ -1,5 +1,6 @@
 #pragma once
 #include "Config.h"
+#include "Tlc549.h"
 #include <core_esp8266_waveform.h>
 #include <cmath>
 
@@ -7,21 +8,26 @@ class Peripheral {
  public:
   void begin(const config::ResourceConfig& spec) {
     spec_ = &spec; value_ = 0; waveform_ = false;
-    available_ = spec.type != config::ResourceType::Analog;
-    if (spec.type == config::ResourceType::Analog) return;
+    available_ = writable();
+    if (spec.type == config::ResourceType::Tlc549) tlc549::begin();
+    if (!writable()) return;
     digitalWrite(spec.gpio, spec.activeLow ? HIGH : LOW);
     pinMode(spec.gpio, OUTPUT);
   }
   const config::ResourceConfig& spec() const { return *spec_; }
-  bool writable() const { return spec_->type != config::ResourceType::Analog; }
+  bool writable() const { return boolean() || spec_->type == config::ResourceType::Pwm; }
   bool boolean() const { return spec_->type == config::ResourceType::Binary; }
   int32_t value() const { return value_; }
   bool available() const { return available_; }
   bool voltageAvailable() const {
-    return spec_->type == config::ResourceType::Analog && available_ && value_ <= config::kAdcFullScaleCount;
+    return !writable() && available_ && (externalAdc() || value_ <= config::kAdcFullScaleCount);
+  }
+  double voltageScale() const {
+    return externalAdc() ? config::kTlc549ReferenceVolts : config::kAdcFullScaleVolts;
   }
   double voltage() const {
-    return std::round(value_ * config::kAdcFullScaleVolts / config::kAdcFullScaleCount * 1000.0) / 1000.0;
+    const int32_t codes = externalAdc() ? config::kTlc549CodeCount : config::kAdcFullScaleCount;
+    return std::round(value_ * voltageScale() / codes * 1000.0) / 1000.0;
   }
 
   bool set(int32_t target) {
@@ -52,8 +58,8 @@ class Peripheral {
   }
 
   bool sample() {
-    if (spec_->type != config::ResourceType::Analog) return false;
-    const int raw = analogRead(spec_->gpio);
+    if (writable()) return false;
+    const int raw = externalAdc() ? tlc549::read() : analogRead(spec_->gpio);
     const bool valid = raw >= spec_->minimum && raw <= spec_->maximum;
     const bool changed = valid != available_ || (valid && raw != value_);
     available_ = valid;
@@ -62,6 +68,7 @@ class Peripheral {
   }
 
  private:
+  bool externalAdc() const { return spec_->type == config::ResourceType::Tlc549; }
   const config::ResourceConfig* spec_ = nullptr;
   int32_t value_ = 0;
   bool available_ = false, waveform_ = false;

@@ -1,6 +1,6 @@
 # ESP8266 WiFi 外设下位机
 
-对接 [Android_WIFI 协议 v1](https://github.com/zxu-source/Android_WIFI/blob/main/docs/protocol/wifi-control-v1.md)及[功能清单规范](https://github.com/zxu-source/Android_WIFI/blob/main/docs/protocol/capability-list.md)，当前固件版本 0.4.0，适配依据为上位机提交 `320f9c0`（2026-10-16）。仅读取相关文件，没有克隆 Android 仓库。用户提供板卡标识为 LOLIN / wemos.cc / NEW NodeMCU V3；沿用 ESP-12E 构建基线，按用户要求以 3.3 V 作为电位器电压换算基准，尚未实物校准 A0。当前支持板载 LED、两路外接开关 LED、两路 PWM LED 和 A0 电位器。**接线表、电阻与 ADC 分压方案见 [外设接线说明](docs/hardware/peripherals.md)。**
+对接 [Android_WIFI 协议 v1](https://github.com/zxu-source/Android_WIFI/blob/main/docs/protocol/wifi-control-v1.md)及[功能清单规范](https://github.com/zxu-source/Android_WIFI/blob/main/docs/protocol/capability-list.md)，当前固件版本 0.5.0，适配依据为上位机提交 `320f9c0`（2026-10-16）。仅读取相关文件，没有克隆 Android 仓库。用户提供板卡标识为 LOLIN / wemos.cc / NEW NodeMCU V3；沿用 ESP-12E 构建基线，按用户要求以 3.3 V 作为电位器电压换算基准，尚未实物校准 A0。当前支持板载 LED、两路外接开关 LED、两路 PWM LED 和 A0 电位器。**接线表、电阻与 ADC 分压方案见 [外设接线说明](docs/hardware/peripherals.md)。**
 
 ## 构建与运行
 
@@ -23,6 +23,7 @@ COM3 换成自己的端口。也可在 Arduino IDE 打开 `ESP8266_Remote/ESP826
 | `nodemcuv2` | 默认 STA，使用 WiFiConfig.h 的项目配置 | 常规构建/上传入口 |
 | `nodemcuv2_sta` | 显式 STA | 保留既有 STA 构建入口 |
 | `nodemcuv2_ap` | 显式 SoftAP | 不依赖手机热点凭据的板端热点演示 |
+| `nodemcuv2_tlc549` | STA | 接好外置 ADC 后启用第 7 项资源，见 [TLC549 接线](docs/hardware/tlc549.md) |
 
 STA 的 IP 由 DHCP 分配，不固定为 `192.168.4.1`；以串口 `API: http://...` 为准。手机开热点时 App 选择“系统路由”，也可发现并选择设备。首次连接先 GET device，再 GET state。STA 连接和重连不阻塞主循环，断联保持输出。
 
@@ -46,7 +47,7 @@ STA 的 IP 由 DHCP 分配，不固定为 `192.168.4.1`；以串口 `API: http:/
 
 设备 ID 来源于芯片 ID；bootId 每次启动由随机数生成，revision 从 0 开始，输出或采样值/可用性变化时增加。同值写入/采样不增加。启动先关闭输出，灯光断联保持当前值，重启不恢复上次值。二态输出由 GPIO 回读确认，PWM 回报是波形发生器接受的目标占空比；不等同于实际亮度或负载反馈。驱动失败返回 DRIVER_ERROR。
 
-device 和 state 都提供 `capabilitiesRevision: 2`，电位器新增 voltage。当前注册表在一次启动内固定，名称或资源配置需重新构建并重启，bootId 随之改变；普通输出/采样变化不改变清单版本。当前不提供运行时热插拔；以后新增在线清单更新时，必须同时递增 capabilitiesRevision 和状态 revision，并原子提供匹配的描述/状态。
+device 和 state 都提供 capabilitiesRevision，基础构建为 2，TLC549 构建为 3。当前注册表在一次启动内固定，名称或资源配置需重新构建并重启，bootId 随之改变；普通输出/采样变化不改变清单版本。当前不提供运行时热插拔；以后新增在线清单更新时，必须同时递增 capabilitiesRevision 和状态 revision，并原子提供匹配的描述/状态。
 
 请求先完成校验再操作 GPIO；类型错误、旧 bootId、未知资源、无效 JSON 等拒绝请求不改变输出。支持协议规定的 400/404/405/409/413/415/422/500 错误及 JSON 格式，405 带 Allow。所有响应为 JSON 且禁止缓存。
 
@@ -62,7 +63,7 @@ HTTP 使用固定缓冲区、分段收发，最多一个活动连接；每轮最
 
 电压按用户确认的 3.3 V 基准估算：`round(raw × 3.3 / 1024, 3)`，512 对应 1.650 V，1024 对应 3.300 V。raw 保留 SDK uint16 返回的原始计数（0–65535 是返回值容器范围，不是 ADC 的位数/精度）；超过标称 1024 时仍显示 raw，voltage 为 null/unavailable，避免伪造超量程电压。负数或超出 SDK 返回值类型范围才使两项均 unavailable。首次采样前两项同样为 null/unavailable。
 
-旧版超过 1023 即显示不可用是软件判断，不是硬件过压报警；ADC 计数或饱和无法反推实际输入超过多少。3.3 V 是软件换算模型，非校准结果或硬件保护。PWM LED 每只单独串 1 kΩ 电阻；A0 接线说明仍区分板级分压与裸芯片限制。电机缺少驱动和额定参数，光敏器件按用户决定延后，均不注册。
+旧版超过 1023 即显示不可用是软件判断，不是硬件过压报警；ADC 计数或饱和无法反推实际输入超过多少。3.3 V 是软件换算模型，非校准结果或硬件保护。PWM LED 每只单独串 1 kΩ 电阻；A0 接线说明仍区分板级分压与裸芯片限制。电机缺少驱动和额定参数，不注册。可选 TLC549 固件注册只读光敏通道，不改动 A0 电位器。
 
 安卓按清单给定的 0–100 范围发送百分数：50 表示 50%，不是 0.5。客户端统一使用 Double，因此线上可能是 `50.0`。固件 0.3.1 接受整数值的 JSON 数字（如 50、50.0、5e1），继续拒绝 50.5、字符串、布尔值、非有限数、越界和不符合步长的目标；不会通过截断把小数转成整数。0.3.0 的类型校验会误拒绝这类 `.0` 请求，需重新构建/烧录修复版，详见 [PWM 数值兼容验证](docs/testing/2026-10-16-pwm-json.md)。
 

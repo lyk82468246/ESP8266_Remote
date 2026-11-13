@@ -13,6 +13,10 @@ if (!(Test-Path -LiteralPath $jsonInclude)) { throw 'Run pio run first to instal
 if ($LASTEXITCODE -ne 0) { throw 'Native test compilation failed.' }
 & "$testOutput\contract.exe" $testOutput
 if ($LASTEXITCODE -ne 0) { throw 'Native contract tests failed.' }
+& $Compiler -std=c++11 -Wall -Wextra -Werror -DREMOTE_ENABLE_TLC549=1 "-I$projectRoot\tests\stubs" "-I$projectRoot\ESP8266_Remote" "-I$jsonInclude" "$projectRoot\tests\contract.cpp" -o "$testOutput\contract-tlc549.exe"
+if ($LASTEXITCODE -ne 0) { throw 'TLC549 test compilation failed.' }
+& "$testOutput\contract-tlc549.exe" $testOutput
+if ($LASTEXITCODE -ne 0) { throw 'TLC549 contract tests failed.' }
 foreach ($mode in @('sta', 'ap', 'empty')) {
     [string[]]$modeFlags = if ($mode -eq 'ap') { @('-DREMOTE_USE_STA=0') } else { @('-DREMOTE_USE_STA=1') }
     if ($mode -eq 'empty') { $modeFlags += '-DREMOTE_TEST_EMPTY_SSID=1' }
