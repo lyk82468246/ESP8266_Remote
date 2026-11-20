@@ -1,0 +1,21 @@
+# 电位器与红绿 PWM 联动验证
+
+本次将固件升级为 0.8.0。`led.red`/`pwm.red` 与 `led.green`/`pwm.green` 各自独立：对应开关灯关闭时，PWM 每 250 ms 跟随 A0 电位器；对应开关灯打开时，PWM 不再被电位器覆盖，由上位机 PUT 设置。
+
+电位器 raw 到 PWM 的换算为 `round(raw × 100 / 1024)`，超出名义 10 位量程的诊断值饱和到 100%，不改变 raw/voltage 的既有报告规则。状态接口始终返回驱动确认的当前 PWM 值，因此联动时安卓轮询会覆盖其滑块显示。
+
+契约测试覆盖：
+
+- 红绿两路初始跟随同一电位器采样；
+- 联动状态下上位机临时写入会在下一次采样被实际电位器值覆盖；
+- 打开红色开关灯后红色 PWM 保持并接受上位机设置，绿色仍继续跟随；
+- 红色切回联动后恢复电位器，绿色打开后保持上位机值；
+- `/api/v1/state` 返回两个最终 PWM 值。
+
+本机验证结果：
+
+- `./tools/test_native.ps1`：392 项协议/HTTP/驱动断言，以及 32/27/5 项 STA、AP、空 SSID 网络生命周期断言通过；
+- `./tools/pio.ps1 run -e nodemcuv2 -e nodemcuv2_ap`：STA RAM 45920/81920（56.1%）、Flash 324315/1044464（31.1%）；AP RAM 45888/81920（56.0%）、Flash 324355/1044464（31.1%）；
+- `tests/check_capabilities.py --schema .tools/upstream/capability-list-latest.schema.json`、Python 语法检查和 `git diff --check` 通过。
+
+当前没有真实 LED、A0 或 Android 无线联调证据；后续需在已烧录的 NodeMCU 上观察两组 LED 和安卓滑块。

@@ -305,6 +305,10 @@ int main(int argc, char** argv) {
     CHECK(api.response()["value"].is<int32_t>());
     CHECK(registry.revision() == before + (previous != expected));
   }
+  // Keep the legacy ADC assertions independent of the green potentiometer
+  // linkage; the dedicated coupling block below covers that mode explicitly.
+  api.handle(make("PUT", "/api/v1/resources/led.green/properties/on", payload(boot, "true")));
+  CHECK(api.status() == 200 && registry.find("led.green")->value());
   const unsigned beforeSensorWrite = gpioWrites + waveformWrites + analogReads;
   api.handle(make("PUT", "/api/v1/resources/sensor.pot/properties/raw", payload(boot, "12")));
   CHECK(api.status() == 422 && api.response()["error"]["code"] == "READ_ONLY");
@@ -392,6 +396,47 @@ int main(int argc, char** argv) {
   api.handle(make("GET", "/api/v1/state"));
   CHECK(api.response()["resources"][6]["values"]["offDelayMs"] == 250);
   CHECK(api.response()["resources"][6]["quality"]["offDelayMs"] == "good");
+
+  // Each binary color selects its PWM source independently.  When off, the
+  // next state sample writes the potentiometer-derived value back to the API;
+  // when on, the PWM stays at its current value until the phone writes it.
+  pinLevels[config::kMicrowaveInputGpio] = HIGH;
+  ResourceRegistry coupledRegistry; CHECK(coupledRegistry.begin());
+  Api coupledApi(coupledRegistry); coupledApi.begin(0x55, 7, 8);
+  coupledApi.handle(make("GET", "/api/v1/state"));
+  const std::string coupledBoot = coupledApi.response()["bootId"].as<std::string>();
+  testAnalogValue = 256; coupledRegistry.sample(10000);
+  CHECK(coupledRegistry.find("pwm.red")->value() == 25);
+  CHECK(coupledRegistry.find("pwm.green")->value() == 25);
+  coupledApi.handle(make("PUT", "/api/v1/resources/pwm.red/properties/level",
+                         payload(coupledBoot, "80")));
+  CHECK(coupledApi.status() == 200 && coupledRegistry.find("pwm.red")->value() == 80);
+  coupledRegistry.sample(10250);
+  CHECK(coupledRegistry.find("pwm.red")->value() == 25);
+  coupledApi.handle(make("PUT", "/api/v1/resources/led.red/properties/on",
+                         payload(coupledBoot, "true")));
+  CHECK(coupledApi.status() == 200 && coupledRegistry.find("led.red")->value());
+  coupledApi.handle(make("PUT", "/api/v1/resources/pwm.red/properties/level",
+                         payload(coupledBoot, "80")));
+  CHECK(coupledApi.status() == 200 && coupledRegistry.find("pwm.red")->value() == 80);
+  testAnalogValue = 512; coupledRegistry.sample(10500);
+  CHECK(coupledRegistry.find("pwm.red")->value() == 80);
+  CHECK(coupledRegistry.find("pwm.green")->value() == 50);
+  coupledApi.handle(make("PUT", "/api/v1/resources/led.red/properties/on",
+                         payload(coupledBoot, "false")));
+  CHECK(coupledApi.status() == 200 && coupledRegistry.find("pwm.red")->value() == 50);
+  coupledApi.handle(make("PUT", "/api/v1/resources/led.green/properties/on",
+                         payload(coupledBoot, "true")));
+  CHECK(coupledApi.status() == 200 && coupledRegistry.find("pwm.green")->value() == 50);
+  coupledApi.handle(make("PUT", "/api/v1/resources/pwm.green/properties/level",
+                         payload(coupledBoot, "90")));
+  CHECK(coupledApi.status() == 200 && coupledRegistry.find("pwm.green")->value() == 90);
+  testAnalogValue = 768; coupledRegistry.sample(10750);
+  CHECK(coupledRegistry.find("pwm.red")->value() == 75);
+  CHECK(coupledRegistry.find("pwm.green")->value() == 90);
+  coupledApi.handle(make("GET", "/api/v1/state"));
+  CHECK(coupledApi.response()["resources"][3]["values"]["level"] == 75);
+  CHECK(coupledApi.response()["resources"][4]["values"]["level"] == 90);
 
   // Bad registration never initializes a partial set of outputs.
   ResourceRegistry invalidRegistry;

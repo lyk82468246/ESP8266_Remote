@@ -55,6 +55,11 @@ class ResourceRegistry {
       if (strcmp(id, resources_[i].spec().id) == 0) return &resources_[i];
     return nullptr;
   }
+  const Peripheral* find(const char* id) const {
+    for (size_t i = 0; i < count_; ++i)
+      if (strcmp(id, resources_[i].spec().id) == 0) return &resources_[i];
+    return nullptr;
+  }
   Peripheral& at(size_t i) { return resources_[i]; }
   size_t size() const { return count_; }
   uint64_t revision() const { return revision_; }
@@ -63,16 +68,63 @@ class ResourceRegistry {
     if (!resource.set(target)) return false;
     if (before != resource.value()) ++revision_;
     if (!strcmp(resource.spec().id, config::kOnboardLedResourceId)) manualLedOverride_ = true;
+    if (isColorBinary(resource) && before != resource.value()) syncColorPwm(resource);
     return true;
   }
   void sample(uint32_t now) {
     if (!firstSample_ && now - lastSample_ < config::kSampleIntervalMs) return;
     firstSample_ = false; lastSample_ = now;
     for (size_t i = 0; i < count_; ++i) if (resources_[i].sample(now)) ++revision_;
+    syncPotPwm();
     syncMicrowaveLed();
   }
 
  private:
+  bool isColorBinary(const Peripheral& resource) const {
+    return resource.spec().type == config::ResourceType::Binary &&
+           (!strcmp(resource.spec().id, config::kRedBinaryResourceId) ||
+            !strcmp(resource.spec().id, config::kGreenBinaryResourceId));
+  }
+  Peripheral* colorPwm(const Peripheral& binary) {
+    if (!isColorBinary(binary)) return nullptr;
+    return find(!strcmp(binary.spec().id, config::kRedBinaryResourceId)
+                    ? config::kRedPwmResourceId
+                    : config::kGreenPwmResourceId);
+  }
+  int32_t potPwmLevel() const {
+    const Peripheral* pot = find(config::kPotResourceId);
+    if (!pot || !pot->available()) return -1;
+    // Round to the nearest percentage and saturate diagnostic values above the
+    // nominal 10-bit scale at 100%; raw/voltage reporting remains unchanged.
+    const int64_t numerator = static_cast<int64_t>(pot->value()) * 100 +
+                              config::kAdcFullScaleCount / 2;
+    const int32_t level = static_cast<int32_t>(numerator / config::kAdcFullScaleCount);
+    return level > 100 ? 100 : (level < 0 ? 0 : level);
+  }
+  void applyPwm(Peripheral& pwm, int32_t target) {
+    if (target < 0 || pwm.value() == target) return;
+    const int32_t before = pwm.value();
+    if (pwm.set(target) && before != pwm.value()) ++revision_;
+  }
+  void syncColorPwm(Peripheral& binary) {
+    Peripheral* pwm = colorPwm(binary);
+    if (!pwm) return;
+    if (!binary.value()) {
+      const int32_t level = potPwmLevel();
+      if (level >= 0) applyPwm(*pwm, level);
+    }
+  }
+  void syncPotPwm() {
+    const int32_t level = potPwmLevel();
+    if (level < 0) return;
+    for (const char* binaryId : {config::kRedBinaryResourceId, config::kGreenBinaryResourceId}) {
+      Peripheral* binary = find(binaryId);
+      if (binary && !binary->value()) {
+        Peripheral* pwm = colorPwm(*binary);
+        if (pwm) applyPwm(*pwm, level);
+      }
+    }
+  }
   void syncMicrowaveLed() {
     Peripheral* microwave = find(config::kMicrowaveResourceId);
     Peripheral* led = find(config::kOnboardLedResourceId);
