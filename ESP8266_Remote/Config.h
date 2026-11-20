@@ -2,9 +2,13 @@
 #include <Arduino.h>
 #include "WiFiConfig.h"
 
-#ifndef REMOTE_ENABLE_TLC549
-#define REMOTE_ENABLE_TLC549 0
+// TLC549 is temporarily disabled while the external wiring is on hold. Keep
+// its implementation guarded so it can be restored deliberately later; a
+// build flag must not expose the unfinished sensor in the released firmware.
+#ifdef REMOTE_ENABLE_TLC549
+#undef REMOTE_ENABLE_TLC549
 #endif
+#define REMOTE_ENABLE_TLC549 0
 
 namespace config {
 constexpr uint16_t kPort = 80;
@@ -16,8 +20,8 @@ constexpr uint32_t kIdleTimeoutMs = 1500;
 constexpr uint32_t kRequestTimeoutMs = 5000;
 constexpr uint32_t kMdnsRetryMs = 5000;
 // The registry is immutable during a boot. A configuration flash creates a new bootId.
-constexpr uint32_t kCapabilitiesRevision = REMOTE_ENABLE_TLC549 ? 3 : 2;
-constexpr const char* kFirmwareVersion = "0.5.0";
+constexpr uint32_t kCapabilitiesRevision = 2;
+constexpr const char* kFirmwareVersion = "0.5.1";
 constexpr const char* kDeviceName = "ESP8266 外设控制器";
 constexpr uint32_t kSampleIntervalMs = 250;
 constexpr uint32_t kPwmPeriodUs = 1000;  // 1 kHz LED PWM.
