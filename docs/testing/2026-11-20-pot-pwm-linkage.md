@@ -18,4 +18,9 @@
 - `./tools/pio.ps1 run -e nodemcuv2 -e nodemcuv2_ap`：STA RAM 45920/81920（56.1%）、Flash 324315/1044464（31.1%）；AP RAM 45888/81920（56.0%）、Flash 324355/1044464（31.1%）；
 - `tests/check_capabilities.py --schema .tools/upstream/capability-list-latest.schema.json`、Python 语法检查和 `git diff --check` 通过。
 
-当前没有真实 LED、A0 或 Android 无线联调证据；后续需在已烧录的 NodeMCU 上观察两组 LED 和安卓滑块。
+实物烧录记录：
+
+- `./tools/pio.ps1 run -e nodemcuv2 --target upload --upload-port COM6` 成功；识别 USB-SERIAL CH340 / ESP8266EX，写入 328,464 字节，Hash 校验通过并自动复位；
+- `COM6 / 115200` 串口看到 `API: http://192.168.39.220/api/v1/device` 和 `_wifi-control._tcp` mDNS 注册，启动后进入 SmartLife STA 流程。
+
+尚未连接并观察真实 LED/A0，也没有 Android 无线联调证据；联动行为仍需在 NodeMCU 上实际转动电位器、切换两只布尔灯并观察安卓滑块。
