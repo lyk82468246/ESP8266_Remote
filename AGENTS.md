@@ -11,8 +11,8 @@
 
 ## 项目基线
 
-- 用户提供板卡文字 LOLIN / wemos.cc / NEW NodeMCU V3，沿用 NodeMCU/ESP-12E 构建基线。GPIO2（D4）板载 LED 低电平有效；外接 LED 与 A0 接线见 docs/hardware/peripherals.md，A0 板载分压尚未实测。
-- PlatformIO Core 6.1.18；espressif8266 4.2.1；Arduino Core 3.1.2；ArduinoJson 6.21.5。`nodemcuv2` 默认 STA，`nodemcuv2_sta` 显式 STA，`nodemcuv2_ap` 显式 AP。固件 0.5.1 当前只有 6 个资源（capabilitiesRevision=2）；TLC549 实验代码已由编译期硬开关屏蔽，光敏接线文档保留但尚未实测；电机暂未接入。
+- 用户提供板卡文字 LOLIN / wemos.cc / NEW NodeMCU V3，沿用 NodeMCU/ESP-12E 构建基线。GPIO2（D4）板载 LED 低电平有效；外接 LED、A0 与微波开关干接点接线见 docs/hardware/peripherals.md，A0 板载分压和微波模块外露两线类型尚未实测。
+- PlatformIO Core 6.1.18；espressif8266 4.2.1；Arduino Core 3.1.2；ArduinoJson 6.21.5。`nodemcuv2` 默认 STA，`nodemcuv2_sta` 显式 STA，`nodemcuv2_ap` 显式 AP。固件 0.6.0 当前有 7 个资源（capabilitiesRevision=3），其中 `sensor.microwave.detected` 是 D7/GPIO13 的只读 boolean 输入，按常开干接点、闭合有效实现；模块接线尚未实测。TLC549 实验代码已由编译期硬开关屏蔽，光敏接线文档保留但尚未实测；电机暂未接入。
 - 协议来源：[Android_WIFI 协议 v1](https://github.com/zxu-source/Android_WIFI/blob/main/docs/protocol/wifi-control-v1.md)。查阅相关文档即可，不需克隆整个 Android 仓库。
 - 本次工作只修改下位机。没有实际测试证据时，不宣称真板、无线链路或 Android 联调通过。
 - `.agents/` 是可复用开发约定；测试结果放 `docs/testing/`。用户明确要求本项目 WiFi 参数固定在受版本管理的 `ESP8266_Remote/WiFiConfig.h`，不再使用被忽略的本地配置。

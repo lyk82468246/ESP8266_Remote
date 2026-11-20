@@ -70,8 +70,9 @@ def main():
         for key in ("protocolVersion", "deviceId", "bootId", "capabilitiesRevision"):
             assert light_state[key] == light_description[key], key
         assert light_description["capabilitiesRevision"] == 3
-        assert {r["id"] for r in light_description["resources"]} == set(resources) | {"sensor.light"}
-        assert {r["id"] for r in light_state["resources"]} == set(resources) | {"sensor.light"}
+        historical_base = {"led.main", "led.red", "led.green", "pwm.red", "pwm.green", "sensor.pot"}
+        assert {r["id"] for r in light_description["resources"]} == historical_base | {"sensor.light"}
+        assert {r["id"] for r in light_state["resources"]} == historical_base | {"sensor.light"}
         light = next(r for r in light_state["resources"] if r["id"] == "sensor.light")
         assert light["values"] == {"raw": 255, "voltage": 3.287}
         assert light["quality"] == {"raw": "good", "voltage": "good"}

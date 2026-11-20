@@ -8,19 +8,27 @@ class Peripheral {
  public:
   void begin(const config::ResourceConfig& spec) {
     spec_ = &spec; value_ = 0; waveform_ = false;
-    available_ = writable();
+    available_ = false;
     if (spec.type == config::ResourceType::Tlc549) tlc549::begin();
+    if (spec.type == config::ResourceType::BinarySensor) {
+      pinMode(spec.gpio, INPUT_PULLUP);
+      available_ = true;
+      value_ = (digitalRead(spec.gpio) == (spec.activeLow ? LOW : HIGH)) ? 1 : 0;
+      return;
+    }
+    available_ = writable();
     if (!writable()) return;
     digitalWrite(spec.gpio, spec.activeLow ? HIGH : LOW);
     pinMode(spec.gpio, OUTPUT);
   }
   const config::ResourceConfig& spec() const { return *spec_; }
-  bool writable() const { return boolean() || spec_->type == config::ResourceType::Pwm; }
-  bool boolean() const { return spec_->type == config::ResourceType::Binary; }
+  bool writable() const { return spec_->type == config::ResourceType::Binary || spec_->type == config::ResourceType::Pwm; }
+  bool boolean() const { return spec_->type == config::ResourceType::Binary || spec_->type == config::ResourceType::BinarySensor; }
+  bool hasVoltage() const { return spec_->type == config::ResourceType::Analog || externalAdc(); }
   int32_t value() const { return value_; }
   bool available() const { return available_; }
   bool voltageAvailable() const {
-    return !writable() && available_ && (externalAdc() || value_ <= config::kAdcFullScaleCount);
+    return hasVoltage() && available_ && (externalAdc() || value_ <= config::kAdcFullScaleCount);
   }
   double voltageScale() const {
     return externalAdc() ? config::kTlc549ReferenceVolts : config::kAdcFullScaleVolts;
@@ -59,6 +67,13 @@ class Peripheral {
 
   bool sample() {
     if (writable()) return false;
+    if (spec_->type == config::ResourceType::BinarySensor) {
+      const bool active = digitalRead(spec_->gpio) == (spec_->activeLow ? LOW : HIGH);
+      const bool changed = !available_ || value_ != static_cast<int32_t>(active);
+      available_ = true;
+      if (active) value_ = 1; else value_ = 0;
+      return changed;
+    }
     const int raw = externalAdc() ? tlc549::read() : analogRead(spec_->gpio);
     const bool valid = raw >= spec_->minimum && raw <= spec_->maximum;
     const bool changed = valid != available_ || (valid && raw != value_);

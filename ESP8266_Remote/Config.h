@@ -20,8 +20,8 @@ constexpr uint32_t kIdleTimeoutMs = 1500;
 constexpr uint32_t kRequestTimeoutMs = 5000;
 constexpr uint32_t kMdnsRetryMs = 5000;
 // The registry is immutable during a boot. A configuration flash creates a new bootId.
-constexpr uint32_t kCapabilitiesRevision = 2;
-constexpr const char* kFirmwareVersion = "0.5.1";
+constexpr uint32_t kCapabilitiesRevision = 3;
+constexpr const char* kFirmwareVersion = "0.6.0";
 constexpr const char* kDeviceName = "ESP8266 外设控制器";
 constexpr uint32_t kSampleIntervalMs = 250;
 constexpr uint32_t kPwmPeriodUs = 1000;  // 1 kHz LED PWM.
@@ -39,7 +39,11 @@ constexpr uint8_t kTlc549Clock = 15;  // D8; keep low during boot.
 constexpr uint8_t kTlc549Data = 16;   // D0; through a 3.3 V output buffer.
 constexpr double kTlc549ReferenceVolts = 3.3;
 constexpr int32_t kTlc549CodeCount = 256;
-enum class ResourceType { Binary, Pwm, Analog, Tlc549 };
+// The microwave switch is treated as a dry-contact, normally-open input.
+// D7/GPIO13 is a safe digital input and does not affect ESP8266 boot straps.
+constexpr uint8_t kMicrowaveInputGpio = 13;
+constexpr bool kMicrowaveInputActiveLow = true;
+enum class ResourceType { Binary, Pwm, Analog, Tlc549, BinarySensor };
 struct ResourceConfig {
   const char* id;
   const char* name;
@@ -62,6 +66,8 @@ constexpr ResourceConfig kResources[] = {
     {"pwm.red", "红色调光灯", "level", "亮度", ResourceType::Pwm, 14, false, 0, 100, 1, "%"},
     {"pwm.green", "绿色调光灯", "level", "亮度", ResourceType::Pwm, 12, false, 0, 100, 1, "%"},
     {"sensor.pot", "电位器", "raw", "ADC 原始值", ResourceType::Analog, A0, false, 0, kAdcReportedMaximum, 1, "ADC"},
+    {"sensor.microwave", "微波感应开关", "detected", "检测状态", ResourceType::BinarySensor,
+     kMicrowaveInputGpio, kMicrowaveInputActiveLow, 0, 1, 1, ""},
 #if REMOTE_ENABLE_TLC549
     {"sensor.light", "光敏传感器", "raw", "ADC 原始值", ResourceType::Tlc549, kTlc549Cs, false, 0, kTlc549CodeCount - 1, 1, "ADC"},
 #endif

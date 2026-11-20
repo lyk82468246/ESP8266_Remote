@@ -92,9 +92,11 @@ class Api {
       const auto& spec = output.spec();
       JsonObject resource = resources.createNestedObject();
       resource["id"] = spec.id; resource["name"] = spec.name;
-      const bool boolean = spec.type == config::ResourceType::Binary;
+      const bool boolean = output.boolean();
       const bool writable = output.writable();
-      resource["kind"] = boolean ? "binary-output" : (writable ? "range-output" : "sensor");
+      resource["kind"] = spec.type == config::ResourceType::BinarySensor
+                              ? "sensor"
+                              : (boolean ? "binary-output" : (writable ? "range-output" : "sensor"));
       JsonArray properties = resource.createNestedArray("properties");
       JsonObject property = properties.createNestedObject();
       property["id"] = spec.propertyId; property["name"] = spec.propertyName;
@@ -104,7 +106,7 @@ class Api {
         property["min"] = spec.minimum; property["max"] = spec.maximum;
         property["step"] = spec.step; property["unit"] = spec.unit;
       }
-      if (!writable) {
+      if (!writable && output.hasVoltage()) {
         JsonObject voltage = properties.createNestedObject();
         voltage["id"] = config::kVoltagePropertyId; voltage["name"] = config::kVoltagePropertyName;
         voltage["type"] = "number"; voltage["readable"] = true; voltage["writable"] = false;
@@ -126,7 +128,7 @@ class Api {
       else values[output.spec().propertyId] = output.value();
       JsonObject quality = resource.createNestedObject("quality");
       quality[output.spec().propertyId] = output.available() ? "good" : "unavailable";
-      if (!output.writable()) {
+      if (!output.writable() && output.hasVoltage()) {
         if (output.voltageAvailable()) values[config::kVoltagePropertyId] = output.voltage();
         else values[config::kVoltagePropertyId] = nullptr;
         quality[config::kVoltagePropertyId] = output.voltageAvailable() ? "good" : "unavailable";

@@ -1,6 +1,6 @@
 # ESP8266 WiFi 外设下位机
 
-对接 [Android_WIFI 协议 v1](https://github.com/zxu-source/Android_WIFI/blob/main/docs/protocol/wifi-control-v1.md)及[功能清单规范](https://github.com/zxu-source/Android_WIFI/blob/main/docs/protocol/capability-list.md)，当前固件版本 0.5.1，适配依据为上位机提交 `320f9c0`（2026-10-16）。仅读取相关文件，没有克隆 Android 仓库。用户提供板卡标识为 LOLIN / wemos.cc / NEW NodeMCU V3；沿用 ESP-12E 构建基线，按用户要求以 3.3 V 作为电位器电压换算基准，尚未实物校准 A0。当前支持板载 LED、两路外接开关 LED、两路 PWM LED 和 A0 电位器；TLC549 光敏实验暂时屏蔽。**接线表、电阻与 ADC 分压方案见 [外设接线说明](docs/hardware/peripherals.md)。**
+对接 [Android_WIFI 协议 v1](https://github.com/zxu-source/Android_WIFI/blob/main/docs/protocol/wifi-control-v1.md)及[功能清单规范](https://github.com/zxu-source/Android_WIFI/blob/main/docs/protocol/capability-list.md)，当前固件版本 0.6.0，适配依据为上位机提交 `320f9c0`（2026-10-16）。仅读取相关文件，没有克隆 Android 仓库。用户提供板卡标识为 LOLIN / wemos.cc / NEW NodeMCU V3；沿用 ESP-12E 构建基线，按用户要求以 3.3 V 作为电位器电压换算基准，尚未实物校准 A0。当前支持板载 LED、两路外接开关 LED、两路 PWM LED、A0 电位器和 D7 上的只读微波感应输入；TLC549 光敏实验暂时屏蔽。**接线表、电阻、ADC 分压和继电器干接点安全说明见 [外设接线说明](docs/hardware/peripherals.md)。**
 
 ## 构建与运行
 
@@ -46,7 +46,7 @@ STA 的 IP 由 DHCP 分配，不固定为 `192.168.4.1`；以串口 `API: http:/
 
 设备 ID 来源于芯片 ID；bootId 每次启动由随机数生成，revision 从 0 开始，输出或采样值/可用性变化时增加。同值写入/采样不增加。启动先关闭输出，灯光断联保持当前值，重启不恢复上次值。二态输出由 GPIO 回读确认，PWM 回报是波形发生器接受的目标占空比；不等同于实际亮度或负载反馈。驱动失败返回 DRIVER_ERROR。
 
-device 和 state 都提供 `capabilitiesRevision: 2`。TLC549 实验代码暂时由编译期硬开关屏蔽，不出现在任何当前构建和能力清单中；其接线文档保留供以后恢复时参考。当前注册表在一次启动内固定，名称或资源配置需重新构建并重启，bootId 随之改变；普通输出/采样变化不改变清单版本。当前不提供运行时热插拔；以后新增在线清单更新时，必须同时递增清单版本与状态 revision，并原子提供匹配的描述/状态。
+device 和 state 都提供 `capabilitiesRevision: 3`。TLC549 实验代码暂时由编译期硬开关屏蔽，不出现在任何当前构建和能力清单中；其接线文档保留供以后恢复时参考。微波感应开关注册为 `sensor.microwave` 的只读 boolean 属性 `detected`，当前假定 D7/GPIO13 接常开继电器干接点，闭合表示检测到。当前注册表在一次启动内固定，名称或资源配置需重新构建并重启，bootId 随之改变；普通输出/采样变化不改变清单版本。当前不提供运行时热插拔；以后新增在线清单更新时，必须同时递增清单版本与状态 revision，并原子提供匹配的描述/状态。
 
 请求先完成校验再操作 GPIO；类型错误、旧 bootId、未知资源、无效 JSON 等拒绝请求不改变输出。支持协议规定的 400/404/405/409/413/415/422/500 错误及 JSON 格式，405 带 Allow。所有响应为 JSON 且禁止缓存。
 
@@ -54,11 +54,11 @@ HTTP 使用固定缓冲区、分段收发，最多一个活动连接；每轮最
 
 ## 外设扩展
 
-在 `Config.h` 的 `kResources` 配置实际外设，填写资源/属性 ID、名称、类型、GPIO、有效电平和数值约束。能力描述、路由和状态由同一注册表生成，最多 8 项，检查重复 ID、重复 GPIO、单 ADC 占用和数值约束。GPIO 号码不是 Dx 标签；GPIO0/2/15 有启动电平要求，GPIO1/3 留给串口。当前新外设只使用 D1/D2/D5/D6/A0。
+在 `Config.h` 的 `kResources` 配置实际外设，填写资源/属性 ID、名称、类型、GPIO、有效电平和数值约束。能力描述、路由和状态由同一注册表生成，最多 8 项，检查重复 ID、重复 GPIO、单 ADC 占用和数值约束。GPIO 号码不是 Dx 标签；GPIO0/2/15 有启动电平要求，GPIO1/3 留给串口。当前新外设使用 D1/D2/D5/D6/A0/D7；D7 的微波输入仅支持确认过的低压干接点接法。
 
 设备名、资源名和属性显示名按 UTF-8 Unicode 字符计数，要求 1–64 字符、不能全为空白、不能含 C0/C1 控制字符。拒绝无效 UTF-8；完整配置验证成功后才初始化 GPIO。
 
-二态属性为 boolean on；PWM 属性为 integer level，0–100%、step=1、1 kHz。电位器同一资源有两个只读属性：integer raw 与 number voltage（V），使用同一次缓存采样，每 250 ms 更新；安卓现有多属性能力协议即可显示，无需升级协议或改客户端。
+二态输出属性为 boolean on；PWM 属性为 integer level，0–100%、step=1、1 kHz；微波输入为 `sensor` 的只读 boolean `detected`，安卓按状态文本显示，不发送 PUT。电位器同一资源有两个只读属性：integer raw 与 number voltage（V），使用同一次缓存采样，每 250 ms 更新；安卓现有多属性能力协议即可显示，无需升级协议或改客户端。
 
 电压按用户确认的 3.3 V 基准估算：`round(raw × 3.3 / 1024, 3)`，512 对应 1.650 V，1024 对应 3.300 V。raw 保留 SDK uint16 返回的原始计数（0–65535 是返回值容器范围，不是 ADC 的位数/精度）；超过标称 1024 时仍显示 raw，voltage 为 null/unavailable，避免伪造超量程电压。负数或超出 SDK 返回值类型范围才使两项均 unavailable。首次采样前两项同样为 null/unavailable。
 

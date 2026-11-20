@@ -9,6 +9,7 @@
 #define LOW 0
 #define OUTPUT 1
 #define INPUT 0
+#define INPUT_PULLUP 2
 #define A0 17
 extern int pinLevels[17];
 extern unsigned gpioWrites;

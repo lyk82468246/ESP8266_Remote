@@ -33,6 +33,8 @@ class ResourceRegistry {
               (spec.gpio >= 12 && spec.gpio <= 16))) return false;
         if (spec.type == config::ResourceType::Binary) {
           if (spec.minimum != 0 || spec.maximum != 1 || spec.step != 1) return false;
+        } else if (spec.type == config::ResourceType::BinarySensor) {
+          if (spec.minimum != 0 || spec.maximum != 1 || spec.step != 1) return false;
         } else if (spec.type == config::ResourceType::Pwm) {
           if (spec.minimum != 0 || spec.maximum != 100 || spec.step <= 0 || spec.step > 100 || 100 % spec.step) return false;
         } else return false;
