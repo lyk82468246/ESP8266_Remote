@@ -8,9 +8,9 @@ class Peripheral {
  public:
   void begin(const config::ResourceConfig& spec) {
     spec_ = &spec; value_ = 0; waveform_ = false;
-    available_ = false;
+    available_ = false; durationAvailable_ = false; measuring_ = false; durationMs_ = 0; activeSince_ = 0;
     if (spec.type == config::ResourceType::Tlc549) tlc549::begin();
-    if (spec.type == config::ResourceType::BinarySensor) {
+    if (digitalSensor()) {
       pinMode(spec.gpio, INPUT_PULLUP);
       available_ = true;
       value_ = (digitalRead(spec.gpio) == (spec.activeLow ? LOW : HIGH)) ? 1 : 0;
@@ -23,7 +23,11 @@ class Peripheral {
   }
   const config::ResourceConfig& spec() const { return *spec_; }
   bool writable() const { return spec_->type == config::ResourceType::Binary || spec_->type == config::ResourceType::Pwm; }
-  bool boolean() const { return spec_->type == config::ResourceType::Binary || spec_->type == config::ResourceType::BinarySensor; }
+  bool boolean() const { return spec_->type == config::ResourceType::Binary || digitalSensor(); }
+  bool timedSensor() const { return spec_->type == config::ResourceType::TimedBinarySensor; }
+  bool hasDuration() const { return timedSensor(); }
+  bool durationAvailable() const { return hasDuration() && durationAvailable_; }
+  uint32_t durationMs() const { return durationMs_; }
   bool hasVoltage() const { return spec_->type == config::ResourceType::Analog || externalAdc(); }
   int32_t value() const { return value_; }
   bool available() const { return available_; }
@@ -65,14 +69,29 @@ class Peripheral {
     return true;
   }
 
-  bool sample() {
+  bool sample(uint32_t now) {
     if (writable()) return false;
-    if (spec_->type == config::ResourceType::BinarySensor) {
+    if (digitalSensor()) {
       const bool active = digitalRead(spec_->gpio) == (spec_->activeLow ? LOW : HIGH);
+      const bool wasActive = available_ && value_ != 0;
+      bool durationChanged = false;
+      if (timedSensor()) {
+        if (active && !wasActive) {
+          measuring_ = true;
+          activeSince_ = now;
+        } else if (!active && wasActive && measuring_) {
+          durationMs_ = now - activeSince_;
+          if (durationMs_ > static_cast<uint32_t>(config::kMicrowaveDurationMaximumMs))
+            durationMs_ = static_cast<uint32_t>(config::kMicrowaveDurationMaximumMs);
+          durationAvailable_ = true;
+          measuring_ = false;
+          durationChanged = true;
+        }
+      }
       const bool changed = !available_ || value_ != static_cast<int32_t>(active);
       available_ = true;
       if (active) value_ = 1; else value_ = 0;
-      return changed;
+      return changed || durationChanged;
     }
     const int raw = externalAdc() ? tlc549::read() : analogRead(spec_->gpio);
     const bool valid = raw >= spec_->minimum && raw <= spec_->maximum;
@@ -83,8 +102,13 @@ class Peripheral {
   }
 
  private:
+  bool digitalSensor() const {
+    return spec_->type == config::ResourceType::BinarySensor || timedSensor();
+  }
   bool externalAdc() const { return spec_->type == config::ResourceType::Tlc549; }
   const config::ResourceConfig* spec_ = nullptr;
   int32_t value_ = 0;
   bool available_ = false, waveform_ = false;
+  bool durationAvailable_ = false, measuring_ = false;
+  uint32_t durationMs_ = 0, activeSince_ = 0;
 };

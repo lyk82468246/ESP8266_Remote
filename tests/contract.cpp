@@ -167,10 +167,14 @@ int main(int argc, char** argv) {
   CHECK(api.response()["resources"][5]["properties"][1]["unit"] == "V");
   CHECK(api.response()["resources"][6]["id"] == "sensor.microwave");
   CHECK(api.response()["resources"][6]["kind"] == "sensor");
-  CHECK(api.response()["resources"][6]["properties"].size() == 1);
+  CHECK(api.response()["resources"][6]["properties"].size() == 2);
   CHECK(api.response()["resources"][6]["properties"][0]["id"] == "detected");
   CHECK(api.response()["resources"][6]["properties"][0]["type"] == "boolean");
   CHECK(api.response()["resources"][6]["properties"][0]["writable"] == false);
+  CHECK(api.response()["resources"][6]["properties"][1]["id"] == "offDelayMs");
+  CHECK(api.response()["resources"][6]["properties"][1]["type"] == "integer");
+  CHECK(api.response()["resources"][6]["properties"][1]["writable"] == false);
+  CHECK(api.response()["resources"][6]["properties"][1]["unit"] == "ms");
   const std::string boot = api.response()["bootId"].as<const char*>();
   api.handle(make("GET", "/api/v1/state"));
   CHECK(api.response()["revision"] == 0);
@@ -184,6 +188,8 @@ int main(int argc, char** argv) {
   CHECK(api.response()["resources"][0]["quality"]["on"] == "good");
   CHECK(api.response()["resources"][6]["values"]["detected"] == false);
   CHECK(api.response()["resources"][6]["quality"]["detected"] == "good");
+  CHECK(api.response()["resources"][6]["values"]["offDelayMs"].isNull());
+  CHECK(api.response()["resources"][6]["quality"]["offDelayMs"] == "unavailable");
   api.handle(make("PUT", endpoint, payload(boot, "true")));
   CHECK(api.status() == 200);
   CHECK(pinLevels[2] == LOW);
@@ -309,6 +315,9 @@ int main(int argc, char** argv) {
   api.handle(make("PUT", "/api/v1/resources/sensor.microwave/properties/detected", payload(boot, "true")));
   CHECK(api.status() == 422 && api.response()["error"]["code"] == "READ_ONLY");
   CHECK(gpioWrites + waveformWrites + analogReads == beforeSensorWrite);
+  api.handle(make("PUT", "/api/v1/resources/sensor.microwave/properties/offDelayMs", payload(boot, "1000")));
+  CHECK(api.status() == 422 && api.response()["error"]["code"] == "READ_ONLY");
+  CHECK(gpioWrites + waveformWrites + analogReads == beforeSensorWrite);
 
   // First sample, rate limit, unchanged values, invalid input and recovery.
   CHECK(!registry.find("sensor.pot")->available());
@@ -367,6 +376,11 @@ int main(int argc, char** argv) {
   pinLevels[config::kMicrowaveInputGpio] = LOW;
   registry.sample(4250);
   CHECK(registry.find("sensor.microwave")->available() && registry.find("sensor.microwave")->value() == 1);
+  CHECK(pinLevels[2] == LOW && registry.find("led.main")->value());
+  CHECK(registry.revision() == revision + 2);
+  revision += 2;
+  api.handle(make("PUT", "/api/v1/resources/led.main/properties/on", payload(boot, "false")));
+  CHECK(api.status() == 200 && !registry.find("led.main")->value());
   CHECK(registry.revision() == ++revision);
   api.handle(make("GET", "/api/v1/state"));
   CHECK(api.response()["resources"][6]["values"]["detected"] == true);
@@ -374,6 +388,10 @@ int main(int argc, char** argv) {
   pinLevels[config::kMicrowaveInputGpio] = HIGH;
   registry.sample(4500);
   CHECK(registry.find("sensor.microwave")->value() == 0 && registry.revision() == ++revision);
+  CHECK(!registry.find("led.main")->value() && pinLevels[2] == HIGH);
+  api.handle(make("GET", "/api/v1/state"));
+  CHECK(api.response()["resources"][6]["values"]["offDelayMs"] == 250);
+  CHECK(api.response()["resources"][6]["quality"]["offDelayMs"] == "good");
 
   // Bad registration never initializes a partial set of outputs.
   ResourceRegistry invalidRegistry;

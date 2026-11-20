@@ -33,7 +33,8 @@ class ResourceRegistry {
               (spec.gpio >= 12 && spec.gpio <= 16))) return false;
         if (spec.type == config::ResourceType::Binary) {
           if (spec.minimum != 0 || spec.maximum != 1 || spec.step != 1) return false;
-        } else if (spec.type == config::ResourceType::BinarySensor) {
+        } else if (spec.type == config::ResourceType::BinarySensor ||
+                   spec.type == config::ResourceType::TimedBinarySensor) {
           if (spec.minimum != 0 || spec.maximum != 1 || spec.step != 1) return false;
         } else if (spec.type == config::ResourceType::Pwm) {
           if (spec.minimum != 0 || spec.maximum != 100 || spec.step <= 0 || spec.step > 100 || 100 % spec.step) return false;
@@ -45,6 +46,7 @@ class ResourceRegistry {
         if (strcmp(spec.id, specs[j].id) == 0) return false;
     }
     count_ = count; revision_ = 0; firstSample_ = true; lastSample_ = 0;
+    microwaveKnown_ = false; manualLedOverride_ = false; lastMicrowaveState_ = false;
     for (size_t i = 0; i < count_; ++i) resources_[i].begin(specs[i]);
     return true;
   }
@@ -60,18 +62,37 @@ class ResourceRegistry {
     const int32_t before = resource.value();
     if (!resource.set(target)) return false;
     if (before != resource.value()) ++revision_;
+    if (!strcmp(resource.spec().id, config::kOnboardLedResourceId)) manualLedOverride_ = true;
     return true;
   }
   void sample(uint32_t now) {
     if (!firstSample_ && now - lastSample_ < config::kSampleIntervalMs) return;
     firstSample_ = false; lastSample_ = now;
-    for (size_t i = 0; i < count_; ++i) if (resources_[i].sample()) ++revision_;
+    for (size_t i = 0; i < count_; ++i) if (resources_[i].sample(now)) ++revision_;
+    syncMicrowaveLed();
   }
 
  private:
+  void syncMicrowaveLed() {
+    Peripheral* microwave = find(config::kMicrowaveResourceId);
+    Peripheral* led = find(config::kOnboardLedResourceId);
+    if (!microwave || !led || !microwave->available()) return;
+    const bool detected = microwave->value() != 0;
+    if (microwaveKnown_ && detected == lastMicrowaveState_) return;
+    microwaveKnown_ = true;
+    lastMicrowaveState_ = detected;
+    const bool wasManualOverride = manualLedOverride_;
+    manualLedOverride_ = false;
+    const int32_t target = detected ? 1 : 0;
+    if (wasManualOverride || led->value() != target) {
+      if (led->value() != target && led->set(target)) ++revision_;
+    }
+  }
+
   Peripheral resources_[config::kMaxResources];
   size_t count_ = 0;
   uint64_t revision_ = 0;
   uint32_t lastSample_ = 0;
   bool firstSample_ = true;
+  bool microwaveKnown_ = false, manualLedOverride_ = false, lastMicrowaveState_ = false;
 };

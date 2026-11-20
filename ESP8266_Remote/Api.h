@@ -94,7 +94,8 @@ class Api {
       resource["id"] = spec.id; resource["name"] = spec.name;
       const bool boolean = output.boolean();
       const bool writable = output.writable();
-      resource["kind"] = spec.type == config::ResourceType::BinarySensor
+      resource["kind"] = (spec.type == config::ResourceType::BinarySensor ||
+                           spec.type == config::ResourceType::TimedBinarySensor)
                               ? "sensor"
                               : (boolean ? "binary-output" : (writable ? "range-output" : "sensor"));
       JsonArray properties = resource.createNestedArray("properties");
@@ -111,6 +112,14 @@ class Api {
         voltage["id"] = config::kVoltagePropertyId; voltage["name"] = config::kVoltagePropertyName;
         voltage["type"] = "number"; voltage["readable"] = true; voltage["writable"] = false;
         voltage["min"] = 0; voltage["max"] = output.voltageScale(); voltage["unit"] = "V";
+      }
+      if (output.hasDuration()) {
+        JsonObject duration = properties.createNestedObject();
+        duration["id"] = config::kMicrowaveDurationPropertyId;
+        duration["name"] = config::kMicrowaveDurationPropertyName;
+        duration["type"] = "integer"; duration["readable"] = true; duration["writable"] = false;
+        duration["min"] = 0; duration["max"] = config::kMicrowaveDurationMaximumMs;
+        duration["step"] = 1; duration["unit"] = "ms";
       }
     }
   }
@@ -132,6 +141,11 @@ class Api {
         if (output.voltageAvailable()) values[config::kVoltagePropertyId] = output.voltage();
         else values[config::kVoltagePropertyId] = nullptr;
         quality[config::kVoltagePropertyId] = output.voltageAvailable() ? "good" : "unavailable";
+      }
+      if (output.hasDuration()) {
+        if (output.durationAvailable()) values[config::kMicrowaveDurationPropertyId] = output.durationMs();
+        else values[config::kMicrowaveDurationPropertyId] = nullptr;
+        quality[config::kMicrowaveDurationPropertyId] = output.durationAvailable() ? "good" : "unavailable";
       }
     }
   }
@@ -168,8 +182,10 @@ class Api {
     }
     Peripheral* output = registry_.find(resourceId);
     if (!output) { error(404, "RESOURCE_NOT_FOUND", "Resource does not exist", requestId); return; }
-    if (strcmp(propertyId, output->spec().propertyId) &&
-        !(!output->writable() && !strcmp(propertyId, config::kVoltagePropertyId))) {
+    const bool voltageProperty = !output->writable() && !strcmp(propertyId, config::kVoltagePropertyId);
+    const bool durationProperty = output->hasDuration() &&
+                                  !strcmp(propertyId, config::kMicrowaveDurationPropertyId);
+    if (strcmp(propertyId, output->spec().propertyId) && !voltageProperty && !durationProperty) {
       error(404, "PROPERTY_NOT_FOUND", "Property does not exist", requestId); return;
     }
     if (strcmp(expectedBoot, bootId_)) {
