@@ -14,4 +14,5 @@
 - `./tools/pio.ps1 run -e nodemcuv2 -e nodemcuv2_ap`：STA RAM 46512/81920（56.8%）、Flash 327423/1044464（31.3%）；AP RAM 46484/81920（56.7%）、Flash 326063/1044464（31.2%）。
 - ELF 关键段：STA/AP `.text1` 均为 29025 字节；按 ESP8266 32 KiB flash cache 保留区计算，IRAM 仍低于 64 KiB 上限，但余量比 0.8.0 更紧，后续新增 ISR 前必须重新检查。
 - `tests/check_capabilities.py` Schema 检查通过；`python -m py_compile tests/check_capabilities.py tools/check_device.py`、`python tools/check_device.py --help` 和 `git diff --check` 通过。
-- 本轮实物烧录与真实微波/电位器联调在提交前尚未执行；烧录结果和串口启动记录将在上传后补记。
+- 实物烧录：`./tools/pio.ps1 run -e nodemcuv2 --target upload --upload-port COM6` 成功；ESP8266EX（MAC 未写入记录）写入 331568 字节，`Hash of data verified`，随后通过 RTS 复位。
+- 复位后 115200 串口观察到 `STA connecting to configured hotspot/WLAN; waiting for DHCP address.`、`API: http://192.168.39.220/api/v1/device` 和 `mDNS: WiFi-Control-esp8266-0cbc29._wifi-control._tcp.local.`，证明固件启动并拿到 STA 地址；未执行真实微波边沿、电位器变化或 Android 真机联调。
