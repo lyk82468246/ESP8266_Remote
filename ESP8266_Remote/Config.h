@@ -21,9 +21,10 @@ constexpr uint32_t kRequestTimeoutMs = 5000;
 constexpr uint32_t kMdnsRetryMs = 5000;
 // The registry is immutable during a boot. A configuration flash creates a new bootId.
 constexpr uint32_t kCapabilitiesRevision = 4;
-constexpr const char* kFirmwareVersion = "0.8.0";
+constexpr const char* kFirmwareVersion = "0.9.0";
 constexpr const char* kDeviceName = "ESP8266 外设控制器";
-constexpr uint32_t kSampleIntervalMs = 250;
+constexpr uint32_t kSampleIntervalMs = 50;  // 20 Hz A0/PWM linkage sampling.
+constexpr uint32_t kMicrowaveDebounceMs = 20;
 constexpr uint32_t kPwmPeriodUs = 1000;  // 1 kHz LED PWM.
 // User-confirmed board-level 3.3 V scale; SDK system_adc_read uses 1/1024 V units
 // at the chip. This is an estimate, not an overvoltage measurement or calibration.

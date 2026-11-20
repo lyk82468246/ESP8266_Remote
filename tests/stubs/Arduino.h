@@ -10,12 +10,17 @@
 #define OUTPUT 1
 #define INPUT 0
 #define INPUT_PULLUP 2
+#define CHANGE 2
+#define IRAM_ATTR
 #define A0 17
 extern int pinLevels[17];
 extern unsigned gpioWrites;
 extern bool failReadback;
 extern void (*testGpioWriteHook)(uint8_t, int);
 extern int (*testGpioReadHook)(uint8_t);
+extern void (*testInterruptHandler)(void*);
+extern void* testInterruptContext;
+extern uint8_t testInterruptPin;
 extern uint32_t testMicros;
 inline void delayMicroseconds(uint32_t us) { testMicros += us; }
 inline void digitalWrite(uint8_t gpio, int level) {
@@ -27,6 +32,20 @@ inline int digitalRead(uint8_t gpio) {
   if (testGpioReadHook) return testGpioReadHook(gpio);
   return failReadback ? !pinLevels[gpio] : pinLevels[gpio];
 }
+inline int digitalPinToInterrupt(uint8_t pin) { return pin < 16 ? pin : -1; }
+inline void attachInterruptArg(uint8_t pin, void (*handler)(void*), void* context, int) {
+  testInterruptPin = pin; testInterruptHandler = handler; testInterruptContext = context;
+}
+inline void detachInterrupt(uint8_t pin) {
+  if (testInterruptPin == pin) {
+    testInterruptPin = 255; testInterruptHandler = nullptr; testInterruptContext = nullptr;
+  }
+}
+inline void triggerInterrupt() {
+  if (testInterruptHandler) testInterruptHandler(testInterruptContext);
+}
+inline void noInterrupts() {}
+inline void interrupts() {}
 extern int testAnalogValue;
 extern unsigned analogReads;
 inline int analogRead(uint8_t) { ++analogReads; return testAnalogValue; }

@@ -7,13 +7,19 @@
 class Peripheral {
  public:
   void begin(const config::ResourceConfig& spec) {
+    if (spec_ && timedSensor()) detachInterrupt(digitalPinToInterrupt(interruptPin_));
     spec_ = &spec; value_ = 0; waveform_ = false;
     available_ = false; durationAvailable_ = false; measuring_ = false; durationMs_ = 0; activeSince_ = 0;
+    interruptPin_ = spec.gpio; interruptActiveLow_ = spec.activeLow;
+    edgeHead_ = edgeTail_ = 0; edgeOverflow_ = false;
+    hasAcceptedEdge_ = false; lastAcceptedEdgeMs_ = 0;
     if (spec.type == config::ResourceType::Tlc549) tlc549::begin();
     if (digitalSensor()) {
       pinMode(spec.gpio, INPUT_PULLUP);
       available_ = true;
       value_ = (digitalRead(spec.gpio) == (spec.activeLow ? LOW : HIGH)) ? 1 : 0;
+      if (timedSensor())
+        attachInterruptArg(digitalPinToInterrupt(spec.gpio), &Peripheral::edgeISR, this, CHANGE);
       return;
     }
     available_ = writable();
@@ -69,29 +75,37 @@ class Peripheral {
     return true;
   }
 
-  bool sample(uint32_t now) {
+  bool processInterruptEvents() {
+    if (!timedSensor()) return false;
+    bool changed = false;
+    EdgeEvent event;
+    while (popEdge(event)) changed = acceptEdge(event.atMs, event.active) || changed;
+
+    bool overflowed = false;
+    noInterrupts();
+    overflowed = edgeOverflow_;
+    edgeOverflow_ = false;
+    interrupts();
+    if (overflowed) {
+      // A burst larger than the small ISR queue is exceptional for a relay.
+      // Resynchronize from the pin in the main context rather than running
+      // GPIO, timing, or state-management code from the ISR.
+      changed = acceptEdge(millis(),
+                           digitalRead(interruptPin_) ==
+                               (interruptActiveLow_ ? LOW : HIGH)) || changed;
+    }
+    return changed;
+  }
+
+  bool sample(uint32_t /*now*/) {
     if (writable()) return false;
+    if (timedSensor()) return false;
     if (digitalSensor()) {
       const bool active = digitalRead(spec_->gpio) == (spec_->activeLow ? LOW : HIGH);
-      const bool wasActive = available_ && value_ != 0;
-      bool durationChanged = false;
-      if (timedSensor()) {
-        if (active && !wasActive) {
-          measuring_ = true;
-          activeSince_ = now;
-        } else if (!active && wasActive && measuring_) {
-          durationMs_ = now - activeSince_;
-          if (durationMs_ > static_cast<uint32_t>(config::kMicrowaveDurationMaximumMs))
-            durationMs_ = static_cast<uint32_t>(config::kMicrowaveDurationMaximumMs);
-          durationAvailable_ = true;
-          measuring_ = false;
-          durationChanged = true;
-        }
-      }
       const bool changed = !available_ || value_ != static_cast<int32_t>(active);
       available_ = true;
       if (active) value_ = 1; else value_ = 0;
-      return changed || durationChanged;
+      return changed;
     }
     const int raw = externalAdc() ? tlc549::read() : analogRead(spec_->gpio);
     const bool valid = raw >= spec_->minimum && raw <= spec_->maximum;
@@ -102,6 +116,61 @@ class Peripheral {
   }
 
  private:
+  struct EdgeEvent {
+    uint32_t atMs;
+    bool active;
+  };
+  static constexpr uint8_t kEdgeQueueSize = 4;
+
+  static void IRAM_ATTR edgeISR(void* context) {
+    Peripheral* self = static_cast<Peripheral*>(context);
+    const uint8_t next = static_cast<uint8_t>((self->edgeHead_ + 1) % kEdgeQueueSize);
+    if (next == self->edgeTail_) {
+      self->edgeOverflow_ = true;
+      return;
+    }
+    self->edgeTimesMs_[self->edgeHead_] = millis();
+    self->edgeLevels_[self->edgeHead_] =
+        digitalRead(self->interruptPin_) == (self->interruptActiveLow_ ? LOW : HIGH);
+    self->edgeHead_ = next;
+  }
+
+  bool popEdge(EdgeEvent& event) {
+    noInterrupts();
+    if (edgeTail_ == edgeHead_) {
+      interrupts();
+      return false;
+    }
+    const uint8_t index = edgeTail_;
+    event.atMs = edgeTimesMs_[index];
+    event.active = edgeLevels_[index];
+    edgeTail_ = static_cast<uint8_t>((index + 1) % kEdgeQueueSize);
+    interrupts();
+    return true;
+  }
+
+  bool acceptEdge(uint32_t atMs, bool active) {
+    if (hasAcceptedEdge_ && static_cast<uint32_t>(atMs - lastAcceptedEdgeMs_) < config::kMicrowaveDebounceMs)
+      return false;
+    if (active == (value_ != 0)) return false;
+    hasAcceptedEdge_ = true;
+    lastAcceptedEdgeMs_ = atMs;
+    if (active) {
+      measuring_ = true;
+      activeSince_ = atMs;
+    } else if (measuring_) {
+      uint32_t elapsed = atMs - activeSince_;
+      if (elapsed > static_cast<uint32_t>(config::kMicrowaveDurationMaximumMs))
+        elapsed = static_cast<uint32_t>(config::kMicrowaveDurationMaximumMs);
+      durationMs_ = elapsed;
+      durationAvailable_ = true;
+      measuring_ = false;
+    }
+    value_ = active ? 1 : 0;
+    available_ = true;
+    return true;
+  }
+
   bool digitalSensor() const {
     return spec_->type == config::ResourceType::BinarySensor || timedSensor();
   }
@@ -111,4 +180,12 @@ class Peripheral {
   bool available_ = false, waveform_ = false;
   bool durationAvailable_ = false, measuring_ = false;
   uint32_t durationMs_ = 0, activeSince_ = 0;
+  uint8_t interruptPin_ = 255;
+  bool interruptActiveLow_ = false;
+  volatile uint8_t edgeHead_ = 0, edgeTail_ = 0;
+  volatile bool edgeOverflow_ = false;
+  volatile uint32_t edgeTimesMs_[kEdgeQueueSize] = {};
+  volatile bool edgeLevels_[kEdgeQueueSize] = {};
+  bool hasAcceptedEdge_ = false;
+  uint32_t lastAcceptedEdgeMs_ = 0;
 };

@@ -1,6 +1,6 @@
 # ESP8266 WiFi 外设下位机
 
-对接 [Android_WIFI 协议 v1](https://github.com/zxu-source/Android_WIFI/blob/main/docs/protocol/wifi-control-v1.md)及[功能清单规范](https://github.com/zxu-source/Android_WIFI/blob/main/docs/protocol/capability-list.md)，当前固件版本 0.8.0，适配依据为上位机提交 `320f9c0`（2026-10-16）。仅读取相关文件，没有克隆 Android 仓库。用户提供板卡标识为 LOLIN / wemos.cc / NEW NodeMCU V3；沿用 ESP-12E 构建基线，按用户要求以 3.3 V 作为电位器电压换算基准，尚未实物校准 A0。当前支持板载 LED、两路外接开关 LED、两路 PWM LED、A0 电位器和 D7 上的微波感应输入；微波输入还能自动控制板载 LED并测量一次完整触发周期的延时关闭时间；TLC549 光敏实验暂时屏蔽。**接线表、电阻、ADC 分压和继电器干接点安全说明见 [外设接线说明](docs/hardware/peripherals.md)。**
+对接 [Android_WIFI 协议 v1](https://github.com/zxu-source/Android_WIFI/blob/main/docs/protocol/wifi-control-v1.md)及[功能清单规范](https://github.com/zxu-source/Android_WIFI/blob/main/docs/protocol/capability-list.md)，当前固件版本 0.9.0，适配依据为上位机提交 `320f9c0`（2026-10-16）。仅读取相关文件，没有克隆 Android 仓库。用户提供板卡标识为 LOLIN / wemos.cc / NEW NodeMCU V3；沿用 ESP-12E 构建基线，按用户要求以 3.3 V 作为电位器电压换算基准，尚未实物校准 A0。当前支持板载 LED、两路外接开关 LED、两路 PWM LED、A0 电位器和 D7 上的微波感应输入；微波输入使用 GPIO 中断、自动控制板载 LED并测量一次完整触发周期的延时关闭时间；A0/PWM 联动以 20 Hz 更新；TLC549 光敏实验暂时屏蔽。**接线表、电阻、ADC 分压和继电器干接点安全说明见 [外设接线说明](docs/hardware/peripherals.md)。**
 
 ## 构建与运行
 
@@ -28,7 +28,7 @@ STA 的 IP 由 DHCP 分配，不固定为 `192.168.4.1`；以串口 `API: http:/
 
 需要开发板开热点时使用 `pio run -e nodemcuv2_ap`，上传也指定同一环境（`pio run -e nodemcuv2_ap --target upload --upload-port COM3`）。热点名 `ESP8266-Remote-<芯片ID>`，公开演示密码 `esp8266-demo`，可在 `WiFiConfig.h` 修改。手机手动连接板端热点后访问串口打印的 IP，通常为 `192.168.4.1:80`；该热点不提供互联网。
 
-两种模式均广播 `_wifi-control._tcp.local.` 服务，实例名 `WiFi-Control-<deviceId>`，TXT 提供 `protocolVersion=1` 和 `deviceId`，SRV 端口 80。主循环持续服务 mDNS；断线、重连或 IP 变化后重新注册，注册失败每 5 秒重试，手动 IP 控制仍可使用。厂商热点的客户端隔离/组播限制可能影响可达性或发现，实际效果需真机验证。
+两种模式均广播 `_wifi-control._tcp.local.` 服务，实例名 `WiFi-Control-<deviceId>`，TXT 提供 `protocolVersion=1` 和 `deviceId`，SRV 端口 80。STA 模式用 GotIP/Disconnected 事件更新地址标志，主循环负责 mDNS 注册、更新和失败重试；SoftAP 地址保留轻量检查。断线、重连或 IP 变化后重新注册，注册失败每 5 秒重试，手动 IP 控制仍可使用。厂商热点的客户端隔离/组播限制可能影响可达性或发现，实际效果需真机验证。
 
 ## API
 
@@ -58,7 +58,7 @@ HTTP 使用固定缓冲区、分段收发，最多一个活动连接；每轮最
 
 设备名、资源名和属性显示名按 UTF-8 Unicode 字符计数，要求 1–64 字符、不能全为空白、不能含 C0/C1 控制字符。拒绝无效 UTF-8；完整配置验证成功后才初始化 GPIO。
 
-二态输出属性为 boolean on；PWM 属性为 integer level，0–100%、step=1、1 kHz。每种颜色的二态灯关闭时，对应 PWM 灯在每次电位器采样后跟随 `sensor.pot`：`round(raw × 100 / 1024)`，并将实际 PWM 值通过 `/api/v1/state` 回传以覆盖安卓滑块显示；该颜色二态灯打开后停止自动覆盖，PWM 由上位机 PUT 控制。微波输入为 `sensor` 的只读 boolean `detected` 和只读 integer `offDelayMs`（ms），安卓按状态/数值文本显示，不发送 PUT。电位器同一资源有两个只读属性：integer raw 与 number voltage（V），使用同一次缓存采样，每 250 ms 更新；安卓现有多属性能力协议即可显示，无需升级协议或改客户端。
+二态输出属性为 boolean on；PWM 属性为 integer level，0–100%、step=1、1 kHz。每种颜色的二态灯关闭时，对应 PWM 灯在每次电位器采样后跟随 `sensor.pot`：`round(raw × 100 / 1024)`，并将实际 PWM 值通过 `/api/v1/state` 回传以覆盖安卓滑块显示；该颜色二态灯打开后停止自动覆盖，PWM 由上位机 PUT 控制。微波输入为 `sensor` 的只读 boolean `detected` 和只读 integer `offDelayMs`（ms），D7 边沿由 GPIO 中断捕获，主循环消抖和更新状态；安卓按状态/数值文本显示，不发送 PUT。电位器同一资源有两个只读属性：integer raw 与 number voltage（V），使用同一次缓存采样，每 50 ms 更新；安卓现有多属性能力协议即可显示，无需升级协议或改客户端。
 
 电压按用户确认的 3.3 V 基准估算：`round(raw × 3.3 / 1024, 3)`，512 对应 1.650 V，1024 对应 3.300 V。raw 保留 SDK uint16 返回的原始计数（0–65535 是返回值容器范围，不是 ADC 的位数/精度）；超过标称 1024 时仍显示 raw，voltage 为 null/unavailable，避免伪造超量程电压。负数或超出 SDK 返回值类型范围才使两项均 unavailable。首次采样前两项同样为 null/unavailable。
 

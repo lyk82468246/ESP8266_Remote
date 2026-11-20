@@ -31,7 +31,7 @@ int main() {
   CHECK(WiFi.autoReconnect);
   CHECK(WiFi.ssid == "test-hotspot");
   network.update(); CHECK(MDNS.begins == 0);
-  WiFi.connected = true; WiFi.address = 0x0201a8c0;
+  WiFi.emitGotIp(0x0201a8c0);
 #else
   CHECK(WiFi.currentMode == WIFI_AP);
   CHECK(WiFi.ssid == "ESP8266-Remote-123456");
@@ -44,10 +44,10 @@ int main() {
   CHECK(MDNS.updates == 1);
   network.update(); CHECK(MDNS.begins == 1 && MDNS.updates == 2);
 #if REMOTE_USE_STA
-  WiFi.connected = false; network.update(); CHECK(MDNS.ends == 1);
+  WiFi.emitDisconnected(); network.update(); CHECK(MDNS.ends == 1);
   network.update(); CHECK(MDNS.begins == 1);
-  WiFi.connected = true; network.update(); CHECK(MDNS.begins == 2); // same IP reconnect
-  WiFi.address = 0x0301a8c0; network.update(); CHECK(MDNS.begins == 3 && MDNS.ends == 2);
+  WiFi.emitGotIp(0x0201a8c0); network.update(); CHECK(MDNS.begins == 2); // same IP reconnect
+  WiFi.emitGotIp(0x0301a8c0); network.update(); CHECK(MDNS.begins == 3 && MDNS.ends == 2);
 #else
   WiFi.apAddress = 0x0204a8c0; network.update(); CHECK(MDNS.begins == 2 && MDNS.ends == 1);
 #endif
@@ -56,6 +56,9 @@ int main() {
     MDNS = FakeMDNS();
     MDNS.allowBegin = failure != 0; MDNS.allowService = failure != 1; MDNS.allowTxt = failure != 2;
     NetworkService retrying; CHECK(retrying.begin("esp8266-123456"));
+#if REMOTE_USE_STA
+    WiFi.emitGotIp(0x0301a8c0);
+#endif
     retrying.update(); CHECK(MDNS.begins == 1 && MDNS.ends == 1 && MDNS.updates == 0);
     testMillis += config::kMdnsRetryMs - 1; retrying.update(); CHECK(MDNS.begins == 1);
     MDNS.allowBegin = MDNS.allowService = MDNS.allowTxt = true;
@@ -64,6 +67,9 @@ int main() {
   // Unsigned time arithmetic also works across millis() wraparound.
   MDNS = FakeMDNS(); MDNS.allowBegin = false;
   testMillis = 0xfffffff0; NetworkService wrapping; CHECK(wrapping.begin("esp8266-123456"));
+#if REMOTE_USE_STA
+  WiFi.emitGotIp(0x0401a8c0);
+#endif
   wrapping.update(); testMillis += config::kMdnsRetryMs;
   MDNS.allowBegin = true; wrapping.update(); CHECK(MDNS.begins == 2);
 #endif

@@ -72,10 +72,15 @@ class ResourceRegistry {
     return true;
   }
   void sample(uint32_t now) {
-    if (!firstSample_ && now - lastSample_ < config::kSampleIntervalMs) return;
-    firstSample_ = false; lastSample_ = now;
-    for (size_t i = 0; i < count_; ++i) if (resources_[i].sample(now)) ++revision_;
-    syncPotPwm();
+    for (size_t i = 0; i < count_; ++i)
+      if (resources_[i].processInterruptEvents()) ++revision_;
+    // GPIO interrupt events are processed every loop. Only analog sampling
+    // and the potentiometer-driven PWM refresh remain rate-limited.
+    if (firstSample_ || now - lastSample_ >= config::kSampleIntervalMs) {
+      firstSample_ = false; lastSample_ = now;
+      for (size_t i = 0; i < count_; ++i) if (resources_[i].sample(now)) ++revision_;
+      syncPotPwm();
+    }
     syncMicrowaveLed();
   }
 

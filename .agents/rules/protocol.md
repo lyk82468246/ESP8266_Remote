@@ -11,6 +11,6 @@
 - 使用统一错误结构，无法解析或确认 requestId 时返回 null。错误 HTTP 状态和 code 遵循协议；405 带 Allow。资源/属性不存在和无效值必须明确报错，不能回退为默认输出。
 - 在读 body 和解析 JSON 前执行长度校验；超限返回 413。固定缓冲区溢出不能截断成成功响应。
 - 当前 HTTP 实现要求 Content-Length，不支持 chunked、Expect: 100-continue 或持久连接；拒绝这些形式，不等待无限长或不完整的请求。更改此限制时同步 README 与测试。
-- 当前支持 boolean 输出、integer PWM 范围属性、只读 boolean 微波输入、只读 integer `offDelayMs`，以及电位器的只读 integer raw/number voltage。同一 ADC 缓存生成两项状态、分别带 quality；已知只读属性写入都返回 READ_ONLY。数字输入在初始化内部上拉后即可提供 good 状态；延时值在完整 false→true→false 周期前为 null/unavailable；ADC 首次或无效读数返回 null/unavailable，不能伪造 0。输出变化、采样变化或质量变化通过注册表统一递增全局 revision，每个确认的状态变化递增一次；同一采样若同时改变输入和自动 LED，允许递增多次。
+- 当前支持 boolean 输出、integer PWM 范围属性、只读 boolean 微波输入、只读 integer `offDelayMs`，以及电位器的只读 integer raw/number voltage。同一 ADC 缓存生成两项状态、分别带 quality；已知只读属性写入都返回 READ_ONLY。数字输入在初始化内部上拉后即可提供 good 状态；D7 边沿由 GPIO 中断捕获、主循环消抖；延时值在完整 false→true→false 周期前为 null/unavailable；ADC 首次或无效读数返回 null/unavailable，不能伪造 0。A0/PWM 联动采样周期为 50 ms，HTTP 仍只读取缓存。输出变化、采样变化或质量变化通过注册表统一递增全局 revision，每个确认的状态变化递增一次；同一采样若同时改变输入和自动 LED，允许递增多次。
 - integer 要求数学上的整数值，而非限定 JSON 数字的词法形式；接受 25、25.0、2.5e1，兼容安卓 Double 编码。先验证有限、无小数部分、范围和步长，再转整数；不得截断小数或转换字符串/boolean。回归测试必须包含实际客户端的 `.0` 请求。
 - 不承诺持久 requestId 去重或 exactly-once。删除字段、改变类型/行为或引入非幂等动作前先处理协议版本和上位机兼容。

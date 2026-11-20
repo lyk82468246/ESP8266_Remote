@@ -9,6 +9,8 @@ class NetworkService {
   bool begin(const char* deviceId) {
     snprintf(hostname_, sizeof(hostname_), "%s", deviceId);
     snprintf(instance_, sizeof(instance_), "WiFi-Control-%s", hostname_);
+    started_ = false; mdnsActive_ = false; address_ = 0; lastAttempt_ = 0;
+    retryNow_ = true; pendingAddress_ = 0; addressEventPending_ = false;
     WiFi.persistent(false);
 #if REMOTE_USE_STA
     if (!REMOTE_STA_SSID[0]) {
@@ -17,6 +19,14 @@ class NetworkService {
       return false;
     }
     if (!WiFi.mode(WIFI_STA)) return false;
+    gotIpHandler_ = WiFi.onStationModeGotIP([this](const WiFiEventStationModeGotIP& event) {
+      pendingAddress_ = static_cast<uint32_t>(event.ip);
+      addressEventPending_ = true;
+    });
+    disconnectedHandler_ = WiFi.onStationModeDisconnected([this](const WiFiEventStationModeDisconnected&) {
+      pendingAddress_ = 0;
+      addressEventPending_ = true;
+    });
     WiFi.hostname(hostname_);
     WiFi.setAutoReconnect(true);
     WiFi.begin(REMOTE_STA_SSID, REMOTE_STA_PASSWORD);
@@ -38,10 +48,18 @@ class NetworkService {
   // Run before HTTP early returns, including while idle or handling a slow connection.
   void update() {
     if (!started_) return;
+    uint32_t address = address_;
 #if REMOTE_USE_STA
-    const uint32_t address = WiFi.status() == WL_CONNECTED ? static_cast<uint32_t>(WiFi.localIP()) : 0;
+    noInterrupts();
+    if (addressEventPending_) {
+      address = pendingAddress_;
+      addressEventPending_ = false;
+    }
+    interrupts();
 #else
-    const uint32_t address = static_cast<uint32_t>(WiFi.softAPIP());
+    // SoftAP has no got-IP event in this core; its address is static after
+    // softAP() succeeds, so this is only a lightweight address sanity check.
+    address = static_cast<uint32_t>(WiFi.softAPIP());
 #endif
     if (address != address_) {
       if (mdnsActive_) MDNS.end();
@@ -71,6 +89,9 @@ class NetworkService {
   char hostname_[24] = {}, instance_[40] = {};
   uint32_t address_ = 0, lastAttempt_ = 0;
   bool started_ = false, mdnsActive_ = false, retryNow_ = true;
+  volatile uint32_t pendingAddress_ = 0;
+  volatile bool addressEventPending_ = false;
+  WiFiEventHandler gotIpHandler_, disconnectedHandler_;
   void discoveryFailed() {
     MDNS.end(); mdnsActive_ = false;
     Serial.println("mDNS unavailable; retry in 5 seconds. Manual IP remains available.");

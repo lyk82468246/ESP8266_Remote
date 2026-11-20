@@ -9,6 +9,9 @@ unsigned gpioWrites = 0;
 bool failReadback = false;
 void (*testGpioWriteHook)(uint8_t, int) = nullptr;
 int (*testGpioReadHook)(uint8_t) = nullptr;
+void (*testInterruptHandler)(void*) = nullptr;
+void* testInterruptContext = nullptr;
+uint8_t testInterruptPin = 255;
 uint32_t testMicros = 0;
 int testAnalogValue = 0;
 unsigned analogReads = 0;
@@ -258,7 +261,9 @@ int main(int argc, char** argv) {
   failReadback = false;
   api.handle(make("PUT", endpoint, payload(boot, "false")));
   CHECK(api.status() == 200); CHECK(api.response()["revision"] == 2); CHECK(pinLevels[2] == HIGH);
-  ResourceRegistry restartedRegistry; CHECK(restartedRegistry.begin());
+  // Keep the original registry's simulated D7 interrupt active while testing
+  // a second API session; a real device only has one live registry.
+  ResourceRegistry restartedRegistry; CHECK(restartedRegistry.begin(config::kResources, 6));
   Api restarted(restartedRegistry); restarted.begin(0x123456, 3, 4);
   restarted.handle(make("GET", "/api/v1/device"));
   CHECK(boot != restarted.response()["bootId"].as<const char*>());
@@ -378,6 +383,7 @@ int main(int argc, char** argv) {
   // A normally-open relay contact is active-low on D7: open=idle, closed=detected.
   CHECK(!registry.find("sensor.microwave")->value());
   pinLevels[config::kMicrowaveInputGpio] = LOW;
+  testMillis = 4250; triggerInterrupt();
   registry.sample(4250);
   CHECK(registry.find("sensor.microwave")->available() && registry.find("sensor.microwave")->value() == 1);
   CHECK(pinLevels[2] == LOW && registry.find("led.main")->value());
@@ -390,6 +396,7 @@ int main(int argc, char** argv) {
   CHECK(api.response()["resources"][6]["values"]["detected"] == true);
   CHECK(api.response()["resources"][6]["quality"]["detected"] == "good");
   pinLevels[config::kMicrowaveInputGpio] = HIGH;
+  testMillis = 4500; triggerInterrupt();
   registry.sample(4500);
   CHECK(registry.find("sensor.microwave")->value() == 0 && registry.revision() == ++revision);
   CHECK(!registry.find("led.main")->value() && pinLevels[2] == HIGH);
