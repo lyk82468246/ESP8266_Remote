@@ -1,5 +1,7 @@
 # Android_WIFI 功能清单适配验证
 
+> 历史记录：本文记录 0.2.0 及其后续固定 WiFi 配置阶段的适配事实。当前清单、固件版本和实物启动证据以 [文档索引](../README.md) 和 [0.9.0 验证记录](2026-11-20-interrupt-sampling.md) 为准。
+
 日期：2026-10-16。固件：0.2.0。上位机基线：[320f9c00b35aa7c80edd5911832b7a2ccd5c1c3b](https://github.com/zxu-source/Android_WIFI/commit/320f9c00b35aa7c80edd5911832b7a2ccd5c1c3b)。只读取协议、客户端相关代码、Schema 和验证记录，没有克隆上位机工程，也没有运行或修改 Android 源码。
 
 以下为初次适配时的空 SSID 构建记录。此后用户要求将 WiFi 固定为项目配置，当前状态见末尾追加记录。

@@ -2,6 +2,8 @@
 
 对接 [Android_WIFI 协议 v1](https://github.com/zxu-source/Android_WIFI/blob/main/docs/protocol/wifi-control-v1.md)及[功能清单规范](https://github.com/zxu-source/Android_WIFI/blob/main/docs/protocol/capability-list.md)，当前固件版本 0.9.0，适配依据为上位机提交 `320f9c0`（2026-10-16）。仅读取相关文件，没有克隆 Android 仓库。用户提供板卡标识为 LOLIN / wemos.cc / NEW NodeMCU V3；沿用 ESP-12E 构建基线，按用户要求以 3.3 V 作为电位器电压换算基准，尚未实物校准 A0。当前支持板载 LED、两路外接开关 LED、两路 PWM LED、A0 电位器和 D7 上的微波感应输入；微波输入使用 GPIO 中断、自动控制板载 LED并测量一次完整触发周期的延时关闭时间；A0/PWM 联动以 20 Hz 更新；TLC549 光敏实验暂时屏蔽。**接线表、电阻、ADC 分压和继电器干接点安全说明见 [外设接线说明](docs/hardware/peripherals.md)。**
 
+文档按当前说明与历史证据分层，入口见 [文档索引](docs/README.md)；最新构建、烧录和串口启动记录见 [0.9.0 验证记录](docs/testing/2026-11-20-interrupt-sampling.md)。
+
 ## 构建与运行
 
 PlatformIO Core 6.1.18，平台 `espressif8266@4.2.1`（Arduino Core 3.1.2），ArduinoJson 6.21.5，开发板 `nodemcuv2`。
